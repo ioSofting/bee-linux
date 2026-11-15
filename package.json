@@ -1,0 +1,29 @@
+{
+  "name": "bee-linux",
+  "version": "0.1.0",
+  "private": true,
+  "description": "bee-linux: the agent of beekeeper for Linux servers (monitoring, checks, updates, console)",
+  "author": "ioSofting GmbH",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=cjs --legal-comments=none --external:bufferutil --external:utf-8-validate --outfile=dist/bee-linux.cjs",
+    "check-ts": "tsc -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "mqtt": "^5.16.0",
+    "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.6",
+    "@types/node": "^22.20.3",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

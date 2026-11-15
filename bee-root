@@ -1,0 +1,121 @@
+#!/bin/bash
+# bee-root: what bee-linux needs root for. The user of bee-linux (bee) may run only this program with sudo
+# (/etc/sudoers.d/bee-linux), and this program allows only fixed actions with checked arguments, as far as
+# /etc/bee-linux/root.conf switches them on. Owned by root and not writable for anyone else, as is its folder.
+#
+#   bee-root can                     what is switched on (apt=1, reboot=1, pm2=1, docker=1)
+#   bee-root apt-update              apt-get update
+#   bee-root apt-upgrade PKG...      apt-get install --only-upgrade of these packages (names only, no options)
+#   bee-root reboot                  restart the server in 5 seconds
+#   bee-root pm2                     name, status and restarts of the processes of pm2 of PM2_USER
+#   bee-root docker                  name, image, state and status of the containers
+set -euo pipefail
+umask 022
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
+
+CONF=/etc/bee-linux/root.conf
+LOG_DIR=/var/log/bee-linux
+APT=0
+REBOOT=0
+DOCKER=0
+PM2_USER=
+
+die() {
+    echo "bee-root: $*" >&2
+    exit 2
+}
+
+# Only a file of root that nobody else may change; only KEY=value lines, nothing of it is run
+if [ -f "$CONF" ] && [ "$(stat -c %u "$CONF")" = 0 ] && [ -z "$(find "$CONF" -perm /022)" ]; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            APT) APT=$value ;;
+            REBOOT) REBOOT=$value ;;
+            DOCKER) DOCKER=$value ;;
+            PM2_USER) PM2_USER=$value ;;
+        esac
+    done < <(grep -E '^(APT|REBOOT|DOCKER|PM2_USER)=[A-Za-z0-9_.-]*$' "$CONF" || true)
+fi
+if [ -n "$PM2_USER" ] && ! [[ "$PM2_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    PM2_USER=
+fi
+
+can_apt() { [ "$APT" = 1 ] && command -v apt-get >/dev/null; }
+can_reboot() { [ "$REBOOT" = 1 ] && command -v systemctl >/dev/null; }
+can_pm2() { [ -n "$PM2_USER" ] && id "$PM2_USER" >/dev/null 2>&1 && command -v node >/dev/null; }
+can_docker() { [ "$DOCKER" = 1 ] && command -v docker >/dev/null; }
+
+flag() { if "$@"; then echo 1; else echo 0; fi; }
+
+action=${1:-}
+[ $# -gt 0 ] && shift
+
+case "$action" in
+    can)
+        echo "apt=$(flag can_apt)"
+        echo "reboot=$(flag can_reboot)"
+        echo "pm2=$(flag can_pm2)"
+        echo "docker=$(flag can_docker)"
+        ;;
+
+    apt-update)
+        can_apt || die "apt not allowed (APT=1 in $CONF)"
+        [ $# -eq 0 ] || die "apt-update takes no arguments"
+        exec apt-get update -qq -o DPkg::Lock::Timeout=300
+        ;;
+
+    apt-upgrade)
+        can_apt || die "apt not allowed (APT=1 in $CONF)"
+        [ $# -gt 0 ] || die "no packages"
+        [ $# -le 1000 ] || die "too many packages"
+        for p in "$@"; do
+            [[ "$p" =~ ^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$ ]] || die "not a package name: $p"
+        done
+        mkdir -p -m 0750 "$LOG_DIR"
+        log="$LOG_DIR/apt-upgrade.log"
+        rm -f "$log"
+        # In a unit of its own, outside the one of bee-linux: if a package restarts bee-linux (or it ends otherwise),
+        # dpkg is not killed in the middle. needrestart only lists, it restarts nothing by itself.
+        status=0
+        systemd-run --quiet --wait --collect --unit="bee-linux-upgrade-$$" \
+            --property=StandardOutput="file:$log" --property=StandardError=inherit \
+            --setenv=DEBIAN_FRONTEND=noninteractive --setenv=NEEDRESTART_MODE=l --setenv=LC_ALL=C.UTF-8 \
+            apt-get install --only-upgrade -y -q \
+            -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+            -- "$@" 2>&1 || status=$?
+        cat "$log" 2>/dev/null || true
+        exit "$status"
+        ;;
+
+    reboot)
+        can_reboot || die "reboot not allowed (REBOOT=1 in $CONF)"
+        # a moment later, so that bee-linux can still tell the portal
+        exec systemd-run --quiet --on-active=5 --unit="bee-linux-reboot-$$" systemctl reboot
+        ;;
+
+    pm2)
+        can_pm2 || die "pm2 not allowed (PM2_USER in $CONF)"
+        # pm2 jlist has the environment of every process (passwords): only name, status and restarts leave here
+        timeout 20 runuser -l "$PM2_USER" -c 'pm2 jlist' 2>/dev/null | timeout 20 node -e '
+            let s = "";
+            process.stdin.on("data", d => (s += d));
+            process.stdin.on("end", () => {
+                const i = s.indexOf("[");
+                if (i < 0) process.exit(3);
+                for (const p of JSON.parse(s.slice(i))) {
+                    const e = p.pm2_env || {};
+                    console.log([p.name, e.status, e.restart_time || 0].map(v => String(v).replace(/\s+/g, " ")).join("\t"));
+                }
+            });'
+        ;;
+
+    docker)
+        can_docker || die "docker not allowed (DOCKER=1 in $CONF)"
+        exec timeout 20 docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}'
+        ;;
+
+    *)
+        die "unknown action: ${action:-none}"
+        ;;
+esac
