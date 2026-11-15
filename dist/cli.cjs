@@ -22,6 +22,9 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var cli_exports = {};
 __export(cli_exports, {
   DEFAULT_URL: () => DEFAULT_URL,
+  TOKEN_RE: () => TOKEN_RE,
+  checkServer: () => checkServer,
+  editLine: () => editLine,
   installArgs: () => installArgs,
   main: () => main,
   normalizeUrl: () => normalizeUrl,
@@ -32,8 +35,6 @@ module.exports = __toCommonJS(cli_exports);
 var import_node_child_process = require("node:child_process");
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
-var import_node_readline = require("node:readline");
-var import_node_stream = require("node:stream");
 var DEFAULT_URL = "https://beekeeper.one";
 var ENV_FILE = "/etc/bee-linux/bee-linux.env";
 function installArgs(a) {
@@ -141,31 +142,87 @@ function has(cmd) {
     }
   });
 }
-var Prompt = class {
-  muted = false;
-  rl;
-  constructor() {
-    const out = new import_node_stream.Writable({
-      write: (chunk, _enc, cb) => {
-        if (!this.muted) {
-          process.stdout.write(chunk);
-        }
-        cb();
+function editLine(text, input, secret = false, skipLf = false) {
+  const chars = Array.from(text);
+  let echo = "";
+  const keys = Array.from(input);
+  let i = 0;
+  if (skipLf && keys[0] === "\n") {
+    i = 1;
+  }
+  for (; i < keys.length; i++) {
+    const ch = keys[i];
+    const code = ch.codePointAt(0);
+    if (ch === "\r" || ch === "\n") {
+      return { text: chars.join(""), echo, end: "enter", rest: keys.slice(i + 1).join(""), skipLf: ch === "\r" };
+    }
+    if (ch === "" || ch === "" && !chars.length) {
+      return { text: chars.join(""), echo, end: "abort", rest: "", skipLf: false };
+    }
+    if (ch === "\x7F" || ch === "\b") {
+      if (chars.length) {
+        chars.pop();
+        echo += "\b \b";
       }
-    });
-    this.rl = (0, import_node_readline.createInterface)({ input: process.stdin, output: out, terminal: true });
+    } else if (ch === "") {
+      echo += "\b \b".repeat(chars.length);
+      chars.length = 0;
+    } else if (ch === "\x1B") {
+      if (keys[i + 1] === "[") {
+        i += 2;
+        while (i < keys.length && !/[\x40-\x7e]/.test(keys[i])) {
+          i++;
+        }
+      } else {
+        i++;
+      }
+    } else if (code >= 32 && code !== 127 && !(code >= 128 && code < 160)) {
+      chars.push(ch);
+      echo += secret ? "*" : ch;
+    }
+  }
+  return { text: chars.join(""), echo, rest: "", skipLf: false };
+}
+var Prompt = class {
+  pending = "";
+  skipLf = false;
+  stdin = process.stdin;
+  constructor() {
+    this.stdin.setEncoding("utf8");
+    this.stdin.setRawMode?.(true);
+    this.stdin.resume();
   }
   ask(question, def = "", secret = false) {
+    process.stdout.write(`${question}${def ? ` [${def}]` : ""}: `);
     return new Promise((resolve) => {
-      process.stdout.write(`${question}${def ? ` [${def}]` : ""}: `);
-      this.muted = secret;
-      this.rl.question("", (answer) => {
-        if (secret) {
-          this.muted = false;
-          process.stdout.write("\n");
+      let text = "";
+      const onData = (chunk) => {
+        const r = editLine(text, chunk.toString(), secret, this.skipLf);
+        this.skipLf = false;
+        text = r.text;
+        if (r.echo) {
+          process.stdout.write(r.echo);
         }
-        resolve(answer.trim() || def);
-      });
+        if (!r.end) {
+          return;
+        }
+        this.stdin.off("data", onData);
+        process.stdout.write("\n");
+        if (r.end === "abort") {
+          this.close();
+          console.log("Abgebrochen.");
+          process.exit(130);
+        }
+        this.pending = r.rest;
+        this.skipLf = r.skipLf;
+        resolve(text.trim() || def);
+      };
+      this.stdin.on("data", onData);
+      if (this.pending) {
+        const p = this.pending;
+        this.pending = "";
+        onData(p);
+      }
     });
   }
   async yesNo(question, def) {
@@ -180,26 +237,56 @@ var Prompt = class {
       if (/^(n|nein|no)$/.test(a)) {
         return false;
       }
+      console.log("Bitte j oder n.");
     }
   }
   close() {
-    this.rl.close();
+    this.stdin.setRawMode?.(false);
+    this.stdin.pause();
   }
 };
+var TOKEN_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}$/;
+async function checkServer(url, timeoutMs = 1e4) {
+  if (typeof fetch !== "function") {
+    return null;
+  }
+  try {
+    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.ok === true && typeof body.transport === "string") {
+      return null;
+    }
+    return `unter ${url} antwortet kein Beekeeper-Server (HTTP ${res.status})`;
+  } catch (e) {
+    const err = e;
+    return `${url} nicht erreichbar: ${err.cause?.code || err.cause?.message || err.message}`;
+  }
+}
 async function ask(given) {
   const p = new Prompt();
   try {
     const a = { ...given };
-    console.log("bee-linux verbindet diesen Server mit dem Portal von Beekeeper. Enter nimmt den Vorschlag.\n");
+    console.log("bee-linux verbindet diesen Server mit dem Portal von Beekeeper. Enter nimmt den Vorschlag in [ ].");
     while (!a.url) {
+      let url;
       try {
-        a.url = normalizeUrl(await p.ask("Server", DEFAULT_URL));
+        url = normalizeUrl(await p.ask("Server", DEFAULT_URL));
       } catch (e) {
         console.log(e.message);
+        continue;
+      }
+      const problem = await checkServer(url);
+      if (!problem || (console.log(`Achtung: ${problem}`), await p.yesNo("Trotzdem verwenden?", false))) {
+        a.url = url;
       }
     }
     while (!a.token) {
-      a.token = await p.ask("Enrollment-Token aus dem Portal (Anlage, \u201EEnrollment-Token \u2026\u201C; Eingabe unsichtbar)", "", true);
+      const token = await p.ask("Enrollment-Token aus dem Portal (Anlage, \u201EEnrollment-Token \u2026\u201C)", "", true);
+      if (TOKEN_RE.test(token)) {
+        a.token = token;
+      } else if (token) {
+        console.log("Das ist kein Enrollment-Token (Form: name.zeichenfolge). Im Portal kopieren und hier einf\xFCgen.");
+      }
     }
     a.comment ??= await p.ask("Kommentar im Portal, z. B. \u201EWebserver Kunde M\xFCller\u201C (leer: keiner)");
     a.console ??= await p.yesNo("Konsole im Portal erlauben (Shell als Nutzer bee)?", false);
@@ -222,7 +309,8 @@ async function ask(given) {
       }
     }
     a.update ??= await p.yesNo("bee-linux aus dem Portal aktualisieren (von npm)?", true);
-    console.log("");
+    console.log(`
+Server ${a.url}${a.comment ? `, Kommentar \u201E${a.comment}\u201C` : ""}`);
     return await p.yesNo("Jetzt installieren?", true) ? a : null;
   } finally {
     p.close();
@@ -317,6 +405,9 @@ if (typeof require !== "undefined" && require.main === module) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   DEFAULT_URL,
+  TOKEN_RE,
+  checkServer,
+  editLine,
   installArgs,
   main,
   normalizeUrl,

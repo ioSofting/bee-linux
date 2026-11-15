@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { AGENT_VERSION, buildInventory, parseLatest, type Collected } from '../src/agent.js';
-import { DEFAULT_URL, installArgs, normalizeUrl, parseOptions } from '../src/cli.js';
+import { checkServer, DEFAULT_URL, editLine, installArgs, normalizeUrl, parseOptions, TOKEN_RE } from '../src/cli.js';
 import { diagnose, SUBJECT, summarizeSsh } from '../src/diagnose.js';
 import { parseUpgradeable } from '../src/apt.js';
 import { hostPort, invalidCheck, runChecks } from '../src/checks.js';
@@ -312,4 +312,41 @@ test('details of a deviation: fixed reads, the sources of failed SSH logins', as
     assert.match(unknownCheck.text, /kennt der Agent nicht/);
     const badUnit = await diagnose(tools, 'unit-failed', '--user', []);
     assert.match(badUnit.text, /Ungültiger Name/);
+});
+
+test('the installer reads a line in raw mode', () => {
+    const typed = editLine('', 'beekeeper.on\x7fne');
+    assert.equal(typed.text, 'beekeeper.one');
+    assert.equal(typed.end, undefined);
+    assert.equal(typed.echo, 'beekeeper.on\b \bne');
+    const secret = editLine('', 'ab.cd\r\nnext', true);
+    assert.deepEqual(secret, { text: 'ab.cd', echo: '*****', end: 'enter', rest: '\nnext', skipLf: true });
+    // the \n of \r\n does not answer the next question with its default
+    assert.deepEqual(editLine('', secret.rest, false, secret.skipLf), { text: 'next', echo: 'next', rest: '', skipLf: false });
+    assert.equal(editLine('', '\x1b[A\x1b[200~xy\x1b[201~').text, 'xy', 'arrows and bracketed paste ignored');
+    assert.equal(editLine('abc', '\x15').text, '');
+    assert.equal(editLine('äö', '\x7f').text, 'ä');
+    assert.equal(editLine('x', '\x03').end, 'abort');
+    assert.equal(editLine('', '\r').end, 'enter');
+    assert.ok(TOKEN_RE.test(`acme.${'A'.repeat(32)}`));
+    assert.ok(!TOKEN_RE.test('iobroker.pro'));
+});
+
+test('the installer checks that a Beekeeper server answers', async () => {
+    const server = http.createServer((req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(req.url === '/api/health' ? JSON.stringify({ ok: true, transport: 'mqtt' }) : '{}');
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as net.AddressInfo).port;
+    try {
+        assert.equal(await checkServer(`http://127.0.0.1:${port}`), null);
+        const other = http.createServer((_req, res) => res.end('<html>'));
+        await new Promise<void>(r => other.listen(0, '127.0.0.1', r));
+        const otherPort = (other.address() as net.AddressInfo).port;
+        assert.match((await checkServer(`http://127.0.0.1:${otherPort}`))!, /kein Beekeeper-Server/);
+        other.close();
+    } finally {
+        server.close();
+    }
 });

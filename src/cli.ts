@@ -11,8 +11,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
-import { Writable } from 'node:stream';
 
 export const DEFAULT_URL = 'https://beekeeper.one';
 const ENV_FILE = '/etc/bee-linux/bee-linux.env';
@@ -148,34 +146,107 @@ function has(cmd: string): boolean {
     });
 }
 
-/** Questions on the terminal; the token without echo */
+/** Result of keys typed into a line: the text so far, what to show, and whether the line ended */
+export interface LineEdit {
+    text: string;
+    echo: string;
+    end?: 'enter' | 'abort';
+    /** input after Enter, for the next question (several answers pasted at once) */
+    rest: string;
+    /** the line ended with \r: a \n right after it belongs to it */
+    skipLf: boolean;
+}
+
+/**
+ * The keys of a terminal in raw mode applied to a line: letters (also pasted), Backspace, Ctrl+U, Enter, Ctrl+C;
+ * escape sequences (arrows, bracketed paste) are ignored. A secret line shows a * per character.
+ */
+export function editLine(text: string, input: string, secret = false, skipLf = false): LineEdit {
+    const chars = Array.from(text);
+    let echo = '';
+    const keys = Array.from(input);
+    let i = 0;
+    if (skipLf && keys[0] === '\n') {
+        i = 1;
+    }
+    for (; i < keys.length; i++) {
+        const ch = keys[i];
+        const code = ch.codePointAt(0)!;
+        if (ch === '\r' || ch === '\n') {
+            return { text: chars.join(''), echo, end: 'enter', rest: keys.slice(i + 1).join(''), skipLf: ch === '\r' };
+        }
+        if (ch === '\x03' || (ch === '\x04' && !chars.length)) {
+            return { text: chars.join(''), echo, end: 'abort', rest: '', skipLf: false };
+        }
+        if (ch === '\x7f' || ch === '\b') {
+            if (chars.length) {
+                chars.pop();
+                echo += '\b \b';
+            }
+        } else if (ch === '\x15') {
+            echo += '\b \b'.repeat(chars.length);
+            chars.length = 0;
+        } else if (ch === '\x1b') {
+            // ESC [ params final, ESC O x, or ESC x
+            if (keys[i + 1] === '[') {
+                i += 2;
+                while (i < keys.length && !/[\x40-\x7e]/.test(keys[i])) {
+                    i++;
+                }
+            } else {
+                i++;
+            }
+        } else if (code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code < 0xa0)) {
+            chars.push(ch);
+            echo += secret ? '*' : ch;
+        }
+    }
+    return { text: chars.join(''), echo, rest: '', skipLf: false };
+}
+
+/** Questions on the terminal, read in raw mode: the question stays visible, the token is shown as *** */
 class Prompt {
-    private muted = false;
-    private readonly rl;
+    private pending = '';
+    private skipLf = false;
+    private readonly stdin = process.stdin;
 
     constructor() {
-        const out = new Writable({
-            write: (chunk, _enc, cb) => {
-                if (!this.muted) {
-                    process.stdout.write(chunk);
-                }
-                cb();
-            },
-        });
-        this.rl = createInterface({ input: process.stdin, output: out, terminal: true });
+        this.stdin.setEncoding('utf8');
+        this.stdin.setRawMode?.(true);
+        this.stdin.resume();
     }
 
     ask(question: string, def = '', secret = false): Promise<string> {
+        process.stdout.write(`${question}${def ? ` [${def}]` : ''}: `);
         return new Promise(resolve => {
-            process.stdout.write(`${question}${def ? ` [${def}]` : ''}: `);
-            this.muted = secret;
-            this.rl.question('', answer => {
-                if (secret) {
-                    this.muted = false;
-                    process.stdout.write('\n');
+            let text = '';
+            const onData = (chunk: string | Buffer): void => {
+                const r = editLine(text, chunk.toString(), secret, this.skipLf);
+                this.skipLf = false;
+                text = r.text;
+                if (r.echo) {
+                    process.stdout.write(r.echo);
                 }
-                resolve(answer.trim() || def);
-            });
+                if (!r.end) {
+                    return;
+                }
+                this.stdin.off('data', onData);
+                process.stdout.write('\n');
+                if (r.end === 'abort') {
+                    this.close();
+                    console.log('Abgebrochen.');
+                    process.exit(130);
+                }
+                this.pending = r.rest;
+                this.skipLf = r.skipLf;
+                resolve(text.trim() || def);
+            };
+            this.stdin.on('data', onData);
+            if (this.pending) {
+                const p = this.pending;
+                this.pending = '';
+                onData(p);
+            }
         });
     }
 
@@ -191,11 +262,34 @@ class Prompt {
             if (/^(n|nein|no)$/.test(a)) {
                 return false;
             }
+            console.log('Bitte j oder n.');
         }
     }
 
     close(): void {
-        this.rl.close();
+        this.stdin.setRawMode?.(false);
+        this.stdin.pause();
+    }
+}
+
+/** An enrollment token of the portal: "<tenant>.<random>" */
+export const TOKEN_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}$/;
+
+/** Whether a Beekeeper server answers at url (GET /api/health); the reason if not */
+export async function checkServer(url: string, timeoutMs = 10_000): Promise<string | null> {
+    if (typeof fetch !== 'function') {
+        return null;
+    }
+    try {
+        const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
+        const body = (await res.json().catch(() => null)) as { ok?: unknown; transport?: unknown } | null;
+        if (res.ok && body?.ok === true && typeof body.transport === 'string') {
+            return null;
+        }
+        return `unter ${url} antwortet kein Beekeeper-Server (HTTP ${res.status})`;
+    } catch (e) {
+        const err = e as Error & { cause?: { code?: string; message?: string } };
+        return `${url} nicht erreichbar: ${err.cause?.code || err.cause?.message || err.message}`;
     }
 }
 
@@ -203,16 +297,27 @@ async function ask(given: Answers): Promise<Answers | null> {
     const p = new Prompt();
     try {
         const a: Answers = { ...given };
-        console.log('bee-linux verbindet diesen Server mit dem Portal von Beekeeper. Enter nimmt den Vorschlag.\n');
+        console.log('bee-linux verbindet diesen Server mit dem Portal von Beekeeper. Enter nimmt den Vorschlag in [ ].');
         while (!a.url) {
+            let url: string;
             try {
-                a.url = normalizeUrl(await p.ask('Server', DEFAULT_URL));
+                url = normalizeUrl(await p.ask('Server', DEFAULT_URL));
             } catch (e) {
                 console.log((e as Error).message);
+                continue;
+            }
+            const problem = await checkServer(url);
+            if (!problem || (console.log(`Achtung: ${problem}`), await p.yesNo('Trotzdem verwenden?', false))) {
+                a.url = url;
             }
         }
         while (!a.token) {
-            a.token = await p.ask('Enrollment-Token aus dem Portal (Anlage, „Enrollment-Token …“; Eingabe unsichtbar)', '', true);
+            const token = await p.ask('Enrollment-Token aus dem Portal (Anlage, „Enrollment-Token …“)', '', true);
+            if (TOKEN_RE.test(token)) {
+                a.token = token;
+            } else if (token) {
+                console.log('Das ist kein Enrollment-Token (Form: name.zeichenfolge). Im Portal kopieren und hier einfügen.');
+            }
         }
         a.comment ??= await p.ask('Kommentar im Portal, z. B. „Webserver Kunde Müller“ (leer: keiner)');
         a.console ??= await p.yesNo('Konsole im Portal erlauben (Shell als Nutzer bee)?', false);
@@ -235,7 +340,7 @@ async function ask(given: Answers): Promise<Answers | null> {
             }
         }
         a.update ??= await p.yesNo('bee-linux aus dem Portal aktualisieren (von npm)?', true);
-        console.log('');
+        console.log(`\nServer ${a.url}${a.comment ? `, Kommentar „${a.comment}“` : ''}`);
         return (await p.yesNo('Jetzt installieren?', true)) ? a : null;
     } finally {
         p.close();

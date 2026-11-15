@@ -26150,7 +26150,7 @@ var TunnelClient = class {
 };
 
 // src/agent.ts
-var AGENT_VERSION = "0.5.0";
+var AGENT_VERSION = "0.5.1";
 var MIN = 6e4;
 var JOURNAL_EVERY = 10 * MIN;
 var APT_LIST_EVERY = 30 * MIN;

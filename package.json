@@ -1,6 +1,6 @@
 {
   "name": "bee-linux",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "bee-linux: the agent of Beekeeper for Linux servers (monitoring, checks, updates, console, AI access). Install: sudo npx bee-linux@latest install",
   "author": "ioSofting GmbH",
   "license": "SEE LICENSE IN LICENSE",

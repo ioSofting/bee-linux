@@ -40,7 +40,7 @@ import { TunnelClient, trustedTunnelUrl } from './tunnel-client.js';
  * (bee); what needs root goes through the helper bee-root (root.ts).
  */
 
-export const AGENT_VERSION = '0.5.0';
+export const AGENT_VERSION = '0.5.1';
 
 const MIN = 60_000;
 /** The journal of 24 hours is read this often */
