@@ -24895,11 +24895,11 @@ function startShell(stream, opts) {
 
 // src/root.ts
 var import_node_child_process3 = require("node:child_process");
-var NONE = { apt: false, reboot: false, pm2: false, docker: false, logs: false };
+var NONE = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false };
 var PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
 function parseAbilities(text) {
   const on = (key) => new RegExp(`^${key}=1$`, "m").test(text);
-  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker"), logs: on("logs") };
+  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker"), logs: on("logs"), update: on("update") };
 }
 function parseDocker(text) {
   const list = [];
@@ -24982,6 +24982,15 @@ var Root = class {
       });
       child.on("close", (code) => resolve(code));
     });
+  }
+  /**
+   * Downloads the newest bee-linux and starts install.sh in a unit of its own, which restarts this agent shortly
+   * after. The version that is being installed, or the error.
+   */
+  async selfUpdate() {
+    const r = await this.call(["self-update"], 5 * 6e4);
+    const version = r.stdout.trim().split("\n").pop() ?? "";
+    return r.code === 0 && /^\d+\.\d+\.\d+/.test(version) ? { version } : { error: (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500) };
   }
   /** Restarts the server; the agent gets SIGTERM from systemd shortly after */
   async reboot() {
@@ -26009,12 +26018,30 @@ var TunnelClient = class {
 };
 
 // src/agent.ts
-var AGENT_VERSION = "0.2.0";
+var AGENT_VERSION = "0.3.0";
 var MIN = 6e4;
 var JOURNAL_EVERY = 10 * MIN;
 var APT_LIST_EVERY = 30 * MIN;
 var EXTRAS_EVERY = 5 * MIN;
 var MAX_REPLY_TEXT = 8e3;
+var LATEST_URL = "https://raw.githubusercontent.com/ioSofting/bee-linux/main/package.json";
+var LATEST_EVERY = 6 * 60 * MIN;
+function parseLatest(text) {
+  try {
+    const v = JSON.parse(text).version;
+    return typeof v === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+async function lookUpLatest() {
+  try {
+    const res = await fetch(LATEST_URL, { signal: AbortSignal.timeout(2e4), headers: { "user-agent": `bee-linux/${AGENT_VERSION}` } });
+    return res.ok ? parseLatest(await res.text()) : null;
+  } catch {
+    return null;
+  }
+}
 async function enroll(url, req) {
   let res;
   try {
@@ -26047,6 +26074,9 @@ function buildInventory(input) {
   }
   if (c.abilities.reboot) {
     commands.push("reboot");
+  }
+  if (c.abilities.update) {
+    commands.push("agentUpdate");
   }
   const root = c.linux.mounts.find((m) => m.path === "/");
   return {
@@ -26121,6 +26151,10 @@ var Agent = class {
   collecting = null;
   /** An upgrade of packages is running */
   upgrading = false;
+  /** The newest version on GitHub, when the agent may update itself */
+  latest = null;
+  /** An update of the agent itself was started */
+  updating = false;
   /** The tools of the AI access */
   tools;
   /** AI sessions seen, for the log: id -> who */
@@ -26283,6 +26317,9 @@ var Agent = class {
         if (force || !this.journal || now - this.journal.at > JOURNAL_EVERY) {
           this.journal = { at: now, value: await journalSummary() };
         }
+        if (this.extras.abilities.update && (!this.latest || now - this.latest.at > LATEST_EVERY)) {
+          this.latest = { at: now, value: await lookUpLatest() };
+        }
         if (force || !this.apt || now - this.apt.at > APT_LIST_EVERY) {
           this.apt = { at: now, value: await osUpdates(this.aptUpdatedAt) };
         }
@@ -26315,7 +26352,8 @@ var Agent = class {
               journal: this.journal.value,
               pm2: this.extras.pm2,
               docker: this.extras.docker,
-              sudo: { apt: this.extras.abilities.apt, reboot: this.extras.abilities.reboot }
+              sudo: { apt: this.extras.abilities.apt, reboot: this.extras.abilities.reboot },
+              ...this.extras.abilities.update ? { agentLatest: this.latest?.value ?? null } : {}
             }
           }
         });
@@ -26377,6 +26415,11 @@ var Agent = class {
       case "reboot":
         if (job.ref) {
           await this.reboot(job);
+        }
+        return;
+      case "agentUpdate":
+        if (job.ref) {
+          await this.agentUpdate(job);
         }
         return;
       case "mcp":
@@ -26451,7 +26494,7 @@ var Agent = class {
     const listed = this.apt?.value?.packages ?? [];
     const wanted = Array.isArray(req?.packages) ? req.packages : [];
     const unknown = wanted.filter((p) => typeof p !== "string" || !PACKAGE_NAME.test(p) || !listed.some((l) => l.name === p));
-    if (this.upgrading) {
+    if (this.upgrading || this.updating) {
       await this.reply(ref, "error", "Es l\xE4uft schon ein Update");
       return;
     }
@@ -26493,9 +26536,37 @@ ${tail2}`);
     }
     await this.reply(ref, "done", tail2);
   }
+  /** Installs the newest bee-linux through the helper; install.sh restarts this agent a moment later */
+  async agentUpdate(job) {
+    const ref = job.ref;
+    if (this.upgrading || this.updating) {
+      await this.reply(ref, "error", "Es l\xE4uft gerade ein Update");
+      return;
+    }
+    if (!this.extras?.abilities.update) {
+      await this.reply(ref, "error", "bee-linux darf sich nicht selbst aktualisieren (UPDATE=1 in /etc/bee-linux/root.conf)");
+      return;
+    }
+    this.updating = true;
+    this.log.info(`Update of bee-linux for ${job.by ?? "?"}`);
+    await this.reply(ref, "running", "bee-linux wird heruntergeladen");
+    const r = await this.root.selfUpdate();
+    if ("error" in r) {
+      this.updating = false;
+      this.log.warn(`Update failed: ${r.error}`);
+      await this.reply(ref, "error", `Update fehlgeschlagen: ${r.error}`);
+      return;
+    }
+    this.log.info(`Installing bee-linux ${r.version}, restart follows`);
+    await this.reply(
+      ref,
+      "done",
+      `bee-linux ${r.version} wird installiert (${AGENT_VERSION} vorher); der Agent startet gleich neu. Log: /var/log/bee-linux/update.log`
+    );
+  }
   async reboot(job) {
     const ref = job.ref;
-    if (this.upgrading) {
+    if (this.upgrading || this.updating) {
       await this.reply(ref, "error", "Es l\xE4uft gerade ein Update");
       return;
     }

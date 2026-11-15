@@ -39,7 +39,7 @@ import { TunnelClient, trustedTunnelUrl } from './tunnel-client.js';
  * (bee); what needs root goes through the helper bee-root (root.ts).
  */
 
-export const AGENT_VERSION = '0.2.0';
+export const AGENT_VERSION = '0.3.0';
 
 const MIN = 60_000;
 /** The journal of 24 hours is read this often */
@@ -50,6 +50,29 @@ const APT_LIST_EVERY = 30 * MIN;
 const EXTRAS_EVERY = 5 * MIN;
 /** Longest text of an upgrade that goes back to the portal */
 const MAX_REPLY_TEXT = 8000;
+/** Where the agent looks up the newest version (the helper installs from the same place: bee-root self-update) */
+export const LATEST_URL = 'https://raw.githubusercontent.com/ioSofting/bee-linux/main/package.json';
+/** How often the agent looks up the newest version */
+const LATEST_EVERY = 6 * 60 * MIN;
+
+/** The version of package.json, if it looks like one */
+export function parseLatest(text: string): string | null {
+    try {
+        const v = (JSON.parse(text) as { version?: unknown }).version;
+        return typeof v === 'string' && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v) ? v : null;
+    } catch {
+        return null;
+    }
+}
+
+async function lookUpLatest(): Promise<string | null> {
+    try {
+        const res = await fetch(LATEST_URL, { signal: AbortSignal.timeout(20_000), headers: { 'user-agent': `bee-linux/${AGENT_VERSION}` } });
+        return res.ok ? parseLatest(await res.text()) : null;
+    } catch {
+        return null;
+    }
+}
 
 type EnrollResult =
     { kind: 'ok'; creds: EnrollResponse } | { kind: 'rejected'; reason: string } | { kind: 'retry'; reason: string };
@@ -106,6 +129,9 @@ export function buildInventory(input: {
     }
     if (c.abilities.reboot) {
         commands.push('reboot');
+    }
+    if (c.abilities.update) {
+        commands.push('agentUpdate');
     }
     const root = c.linux.mounts.find(m => m.path === '/');
     return {
@@ -184,6 +210,10 @@ export class Agent {
     private collecting: Promise<void> | null = null;
     /** An upgrade of packages is running */
     private upgrading = false;
+    /** The newest version on GitHub, when the agent may update itself */
+    private latest: { at: number; value: string | null } | null = null;
+    /** An update of the agent itself was started */
+    private updating = false;
     /** The tools of the AI access */
     private readonly tools;
     /** AI sessions seen, for the log: id -> who */
@@ -368,6 +398,9 @@ export class Agent {
                 if (force || !this.journal || now - this.journal.at > JOURNAL_EVERY) {
                     this.journal = { at: now, value: await journalSummary() };
                 }
+                if (this.extras.abilities.update && (!this.latest || now - this.latest.at > LATEST_EVERY)) {
+                    this.latest = { at: now, value: await lookUpLatest() };
+                }
                 if (force || !this.apt || now - this.apt.at > APT_LIST_EVERY) {
                     this.apt = { at: now, value: await osUpdates(this.aptUpdatedAt) };
                 }
@@ -401,6 +434,7 @@ export class Agent {
                             pm2: this.extras.pm2,
                             docker: this.extras.docker,
                             sudo: { apt: this.extras.abilities.apt, reboot: this.extras.abilities.reboot },
+                            ...(this.extras.abilities.update ? { agentLatest: this.latest?.value ?? null } : {}),
                         },
                     },
                 });
@@ -464,6 +498,11 @@ export class Agent {
             case 'reboot':
                 if (job.ref) {
                     await this.reboot(job);
+                }
+                return;
+            case 'agentUpdate':
+                if (job.ref) {
+                    await this.agentUpdate(job);
                 }
                 return;
             case 'mcp':
@@ -545,7 +584,7 @@ export class Agent {
         const listed = this.apt?.value?.packages ?? [];
         const wanted = Array.isArray(req?.packages) ? req.packages : [];
         const unknown = wanted.filter(p => typeof p !== 'string' || !PACKAGE_NAME.test(p) || !listed.some(l => l.name === p));
-        if (this.upgrading) {
+        if (this.upgrading || this.updating) {
             await this.reply(ref, 'error', 'Es läuft schon ein Update');
             return;
         }
@@ -585,9 +624,38 @@ export class Agent {
         await this.reply(ref, 'done', tail);
     }
 
+    /** Installs the newest bee-linux through the helper; install.sh restarts this agent a moment later */
+    private async agentUpdate(job: JobMessage): Promise<void> {
+        const ref = job.ref!;
+        if (this.upgrading || this.updating) {
+            await this.reply(ref, 'error', 'Es läuft gerade ein Update');
+            return;
+        }
+        if (!this.extras?.abilities.update) {
+            await this.reply(ref, 'error', 'bee-linux darf sich nicht selbst aktualisieren (UPDATE=1 in /etc/bee-linux/root.conf)');
+            return;
+        }
+        this.updating = true;
+        this.log.info(`Update of bee-linux for ${job.by ?? '?'}`);
+        await this.reply(ref, 'running', 'bee-linux wird heruntergeladen');
+        const r = await this.root.selfUpdate();
+        if ('error' in r) {
+            this.updating = false;
+            this.log.warn(`Update failed: ${r.error}`);
+            await this.reply(ref, 'error', `Update fehlgeschlagen: ${r.error}`);
+            return;
+        }
+        this.log.info(`Installing bee-linux ${r.version}, restart follows`);
+        await this.reply(
+            ref,
+            'done',
+            `bee-linux ${r.version} wird installiert (${AGENT_VERSION} vorher); der Agent startet gleich neu. Log: /var/log/bee-linux/update.log`,
+        );
+    }
+
     private async reboot(job: JobMessage): Promise<void> {
         const ref = job.ref!;
-        if (this.upgrading) {
+        if (this.upgrading || this.updating) {
             await this.reply(ref, 'error', 'Es läuft gerade ein Update');
             return;
         }

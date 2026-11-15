@@ -5,7 +5,8 @@ import net from 'node:net';
 import os from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { buildInventory, type Collected } from '../src/agent.js';
+import { readFileSync } from 'node:fs';
+import { AGENT_VERSION, buildInventory, parseLatest, type Collected } from '../src/agent.js';
 import { parseUpgradeable } from '../src/apt.js';
 import { hostPort, invalidCheck, runChecks } from '../src/checks.js';
 import { countErrors, countSshFailed } from '../src/journal.js';
@@ -115,7 +116,7 @@ test('package names: nothing that looks like an option', () => {
 });
 
 test('helper: abilities, docker and pm2', () => {
-    assert.deepEqual(parseAbilities('apt=1\nreboot=0\npm2=1\ndocker=0\nlogs=1\n'), { apt: true, reboot: false, pm2: true, docker: false, logs: true });
+    assert.deepEqual(parseAbilities('apt=1\nreboot=0\npm2=1\ndocker=0\nlogs=1\nupdate=1\n'), { apt: true, reboot: false, pm2: true, docker: false, logs: true, update: true });
     assert.deepEqual(
         parseDocker(
             'web\tnginx:1.27\trunning\tUp 3 hours (healthy)\nold\tbusybox\texited\tExited (137) 2 days ago\ndb\tpostgres:16\trunning\tUp 5 seconds (health: starting)\n',
@@ -201,7 +202,7 @@ test('inventory: platform linux, commands by what sudo allows', () => {
         model: 'QEMU Standard PC',
         memTotal: 4e9,
         swapTotal: 1e9,
-        abilities: { apt: true, reboot: false, pm2: false, docker: false, logs: false },
+        abilities: { apt: true, reboot: false, pm2: false, docker: false, logs: false, update: false },
         osUpdates: { packages: [], checkedAt: 1, rebootRequired: false },
         linux: {
             mounts: [{ path: '/', device: '/dev/sda1', fstype: 'ext4', size: 8e10, usedPct: 50, inodesPct: 8 }],
@@ -224,9 +225,9 @@ test('inventory: platform linux, commands by what sudo allows', () => {
     assert.equal(inv.system.diskTotal, 8e10);
     assert.equal(inv.system.os, 'Debian GNU/Linux 12 (bookworm)');
     assert.equal(inv.linux?.distro, 'Debian GNU/Linux 12 (bookworm)');
-    const withConsole = buildInventory({ uuid: 'u', config: { comment: '' }, console: true, ai: true, c: { ...c, abilities: { ...c.abilities, reboot: true } } });
+    const withConsole = buildInventory({ uuid: 'u', config: { comment: '' }, console: true, ai: true, c: { ...c, abilities: { ...c.abilities, reboot: true, update: true } } });
     assert.deepEqual(withConsole.remoteAccess, ['console']);
-    assert.deepEqual(withConsole.commands, ['checks', 'mcp', 'osUpgrade', 'reboot']);
+    assert.deepEqual(withConsole.commands, ['checks', 'mcp', 'osUpgrade', 'reboot', 'agentUpdate']);
     assert.equal(withConsole.ai?.setState, false);
     assert.equal(withConsole.ai?.objectChange, false);
 });
@@ -258,4 +259,13 @@ test('AI tools: only read, arguments checked', async () => {
     assert.match(badContainer.text, /Ungültiger Name/);
     const badConn = await callTool(tools, 'test_connection', { kind: 'tcp', target: 'nohost' });
     assert.match(badConn.text, /host:port/);
+});
+
+test('update of the agent: the newest version, and package.json fits the agent', () => {
+    assert.equal(parseLatest('{"name":"bee-linux","version":"0.3.1"}'), '0.3.1');
+    assert.equal(parseLatest('{"version":"1.0.0-beta.2"}'), '1.0.0-beta.2');
+    assert.equal(parseLatest('{"version":"0.3; rm -rf /"}'), null);
+    assert.equal(parseLatest('<html>404</html>'), null);
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    assert.equal(pkg.version, AGENT_VERSION, 'the portal compares the version of package.json on GitHub with the agent');
 });

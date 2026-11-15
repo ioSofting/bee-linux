@@ -13,6 +13,7 @@
 #   --ai / --no-ai                  allow the AI access: an AI reads the server (journal, logs, services) while a person
 #                                   opened an AI session in the portal; it never writes and has no shell (default off)
 #   --logs / --no-logs              let the AI also read what needs root: logs of Docker and pm2, nginx -t, certbot (default off)
+#   --update / --no-update          allow updates of bee-linux itself from the portal, from GitHub (default on)
 #   --apt / --no-apt                allow updates of packages from the portal (default on)
 #   --reboot / --no-reboot          allow a restart from the portal (default on)
 #   --docker / --no-docker          report the containers of Docker (default on if Docker is installed)
@@ -45,6 +46,7 @@ COMMENT_SET=0
 CONSOLE=
 AI=
 LOGS=
+UPDATE=
 APT=
 REBOOT=
 DOCKER=
@@ -65,6 +67,8 @@ while [ $# -gt 0 ]; do
         --no-ai) AI=false; shift ;;
         --logs) LOGS=1; shift ;;
         --no-logs) LOGS=0; shift ;;
+        --update) UPDATE=1; shift ;;
+        --no-update) UPDATE=0; shift ;;
         --apt) APT=1; shift ;;
         --no-apt) APT=0; shift ;;
         --reboot) REBOOT=1; shift ;;
@@ -75,7 +79,7 @@ while [ $# -gt 0 ]; do
         --source) SOURCE=${2:-}; shift 2 ;;
         --uninstall) UNINSTALL=1; shift ;;
         --purge) PURGE=1; shift ;;
-        -h | --help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
         *) die "unknown option $1 (--help)" ;;
     esac
 done
@@ -195,11 +199,13 @@ if [ ! -f "$ROOT_CONF" ]; then
 # DOCKER=1: list the containers (name, image, state)
 # PM2_USER=name: list the processes of pm2 of this user (name, status, restarts)
 # LOGS=1: the AI access may read logs of Docker and pm2, nginx -t and certbot certificates
+# UPDATE=1: update bee-linux itself from the portal (always from github.com/ioSofting/bee-linux)
 APT=1
 REBOOT=1
 DOCKER=0
 PM2_USER=
 LOGS=0
+UPDATE=1
 EOF
     command -v docker >/dev/null && [ -z "$DOCKER" ] && DOCKER=1
 fi
@@ -217,6 +223,9 @@ set_conf() {
 [ -n "$REBOOT" ] && set_conf REBOOT "$REBOOT"
 [ -n "$DOCKER" ] && set_conf DOCKER "$DOCKER"
 [ -n "$LOGS" ] && set_conf LOGS "$LOGS"
+# installed before UPDATE existed: on, as for a new installation
+[ -z "$UPDATE" ] && ! grep -q '^UPDATE=' "$ROOT_CONF" && UPDATE=1
+[ -n "$UPDATE" ] && set_conf UPDATE "$UPDATE"
 if [ "$PM2_SET" = 1 ]; then
     if [ -n "$PM2_USER" ] && ! id "$PM2_USER" >/dev/null 2>&1; then
         die "user $PM2_USER (--pm2-user) does not exist"

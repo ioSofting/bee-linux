@@ -1,6 +1,6 @@
 {
   "name": "bee-linux",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "bee-linux: the agent of beekeeper for Linux servers (monitoring, checks, updates, console)",
   "author": "ioSofting GmbH",

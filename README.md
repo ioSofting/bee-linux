@@ -34,13 +34,21 @@ Options of `install.sh` (also later, to change a setting; without options it upd
 | `--console` / `--no-console` | allow the console in the portal (default off) |
 | `--ai` / `--no-ai` | allow the AI access, read only (default off; see below) |
 | `--logs` / `--no-logs` | let the AI also read logs of Docker and pm2, `nginx -t` and `certbot certificates` (default off) |
+| `--update` / `--no-update` | allow updates of bee-linux itself from the portal (default on) |
 | `--apt` / `--no-apt` | allow updates of packages from the portal (default on) |
 | `--reboot` / `--no-reboot` | allow a restart from the portal (default on) |
 | `--docker` / `--no-docker` | report the containers of Docker (default on if Docker is installed) |
 | `--pm2-user USER` | report the processes of pm2 of this user |
 | `--uninstall [--purge]` | remove; `--purge` also removes the settings, the enrollment and the user |
 
-Update: `git pull && sudo ./install.sh`.
+Update: in the portal (asset, "Agent", button "Aktualisieren" when GitHub has a newer version), or by hand with
+`git pull && sudo ./install.sh`.
+
+From the portal, the helper downloads `install.sh`, `bee-root` and the agent, always from
+`https://raw.githubusercontent.com/ioSofting/bee-linux/main` (the portal can start an update, but never say where
+the code comes from), and runs `install.sh` in a unit of its own; it keeps the settings and restarts the service. The
+output is in `/var/log/bee-linux/update.log`. The agent looks up the newest version every 6 hours (`package.json` on
+GitHub). `UPDATE=0` in `root.conf` (`--no-update`) switches both off.
 
 ## What it sets up
 
@@ -49,7 +57,7 @@ Update: `git pull && sudo ./install.sh`.
 | user `bee` | system user without login; groups `systemd-journal` and `adm` to read the journal and the logs |
 | `/opt/bee-linux` | `bee-linux.cjs` (the agent, one file) and `bee-root` (the helper for root), owned by root |
 | `/etc/bee-linux/bee-linux.env` | settings of the agent (`BEE_URL`, `BEE_TOKEN`, `BEE_COMMENT`, `BEE_CONSOLE`, `BEE_AI`, `BEE_CHECK`, `BEE_HEARTBEAT`, `BEE_APT_UPDATE`) |
-| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`, `LOGS`) |
+| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`, `LOGS`, `UPDATE`) |
 | `/var/lib/bee-linux` | device certificate, UUID and the checks from the portal; keep it, or the server enrolls anew |
 | `/etc/sudoers.d/bee-linux` | `bee` may run `/opt/bee-linux/bee-root` without a password, nothing else |
 | `bee-linux.service` | the service (systemd), as user `bee` |

@@ -212,6 +212,11 @@ export interface LinuxInfo {
     docker: DockerContainer[] | null;
     /** What sudo allows the agent: apt (update and upgrade of packages), reboot */
     sudo: { apt: boolean; reboot: boolean };
+    /**
+     * The newest version of bee-linux on GitHub, looked up by the agent every few hours when it may update itself
+     * (command agentUpdate; since 0.3.0). null: not known.
+     */
+    agentLatest?: string | null;
 }
 
 /** Home Assistant as bee-ha sees it next to it (Inventory.homeassistant) */
@@ -543,7 +548,8 @@ export type AgentCommand =
     | 'repoUpdate'
     | 'visProjects'
     | 'checks'
-    | 'reboot';
+    | 'reboot'
+    | 'agentUpdate';
 
 /**
  * Command 'software' (since agent 0.2.7): removeAdapter removes an adapter with all its instances (not the agent,
@@ -649,6 +655,8 @@ export interface JobMessage {
      * checks: the checks of the portal for a Linux server (bee-linux), replacing the ones before; no answer, the agent
      * reports LinuxInfo.checksHash
      * reboot: restart the operating system (bee-linux)
+     * agentUpdate: install the newest version of the agent itself (bee-linux from 0.3.0: from GitHub, never from the
+     * server); the agent answers when the installation started, then it restarts
      */
     cmd:
         | 'resync'
@@ -665,7 +673,8 @@ export interface JobMessage {
         | 'repoUpdate'
         | 'visProjects'
         | 'checks'
-        | 'reboot';
+        | 'reboot'
+        | 'agentUpdate';
     /** For cmd 'tunnel' */
     tunnel?: TunnelRequest;
     /** Commands: the agent answers on topic reply with this reference */

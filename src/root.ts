@@ -21,16 +21,18 @@ export interface RootAbilities {
     docker: boolean;
     /** reading for the AI access: logs of Docker and pm2, nginx -t, certbot certificates */
     logs: boolean;
+    /** update of bee-linux itself from GitHub (self-update) */
+    update: boolean;
 }
 
-const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false, logs: false };
+const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false };
 
 /** A package name as Debian allows it; nothing that could be taken for an option */
 export const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
 
 export function parseAbilities(text: string): RootAbilities {
     const on = (key: string): boolean => new RegExp(`^${key}=1$`, 'm').test(text);
-    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker'), logs: on('logs') };
+    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker'), logs: on('logs'), update: on('update') };
 }
 
 /** Lines "name\timage\tstate\tstatus" of `docker ps -a --format` */
@@ -121,6 +123,18 @@ export class Root {
             });
             child.on('close', code => resolve(code));
         });
+    }
+
+    /**
+     * Downloads the newest bee-linux and starts install.sh in a unit of its own, which restarts this agent shortly
+     * after. The version that is being installed, or the error.
+     */
+    async selfUpdate(): Promise<{ version: string } | { error: string }> {
+        const r = await this.call(['self-update'], 5 * 60_000);
+        const version = r.stdout.trim().split('\n').pop() ?? '';
+        return r.code === 0 && /^\d+\.\d+\.\d+/.test(version)
+            ? { version }
+            : { error: (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500) };
     }
 
     /** Restarts the server; the agent gets SIGTERM from systemd shortly after */
