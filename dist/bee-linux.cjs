@@ -480,7 +480,7 @@ var require_errors = __commonJS({
     );
     E(
       "ERR_OUT_OF_RANGE",
-      (str, range, input) => {
+      (str2, range, input) => {
         assert(range, 'Missing "range" argument');
         let received;
         if (Number.isInteger(input) && Math.abs(input) > 2 ** 32) {
@@ -495,7 +495,7 @@ var require_errors = __commonJS({
         } else {
           received = inspect(input);
         }
-        return `The value of "${str}" is out of range. It must be ${range}. Received ${received}`;
+        return `The value of "${str2}" is out of range. It must be ${range}. Received ${received}`;
       },
       RangeError
     );
@@ -2566,20 +2566,20 @@ var require_buffer_list = __commonJS({
         let p = this.head;
         let c = 0;
         do {
-          const str = p.data;
-          if (n > str.length) {
-            ret += str;
-            n -= str.length;
+          const str2 = p.data;
+          if (n > str2.length) {
+            ret += str2;
+            n -= str2.length;
           } else {
-            if (n === str.length) {
-              ret += str;
+            if (n === str2.length) {
+              ret += str2;
               ++c;
               if (p.next) this.head = p.next;
               else this.head = this.tail = null;
             } else {
-              ret += StringPrototypeSlice(str, 0, n);
+              ret += StringPrototypeSlice(str2, 0, n);
               this.head = p;
-              p.data = StringPrototypeSlice(str, n);
+              p.data = StringPrototypeSlice(str2, n);
             }
             break;
           }
@@ -5728,13 +5728,13 @@ var require_compose = __commonJS({
         }
       }
       const head = streams[0];
-      const tail = pipeline(streams, onfinished);
+      const tail2 = pipeline(streams, onfinished);
       const writable = !!(isWritable(head) || isWritableStream(head) || isTransformStream(head));
-      const readable = !!(isReadable(tail) || isReadableStream(tail) || isTransformStream(tail));
+      const readable = !!(isReadable(tail2) || isReadableStream(tail2) || isTransformStream(tail2));
       d = new Duplex2({
         // TODO (ronag): highWaterMark?
         writableObjectMode: !!(head !== null && head !== void 0 && head.writableObjectMode),
-        readableObjectMode: !!(tail !== null && tail !== void 0 && tail.readableObjectMode),
+        readableObjectMode: !!(tail2 !== null && tail2 !== void 0 && tail2.readableObjectMode),
         writable,
         readable
       });
@@ -5782,7 +5782,7 @@ var require_compose = __commonJS({
             }
           };
         }
-        const toRead = isTransformStream(tail) ? tail.readable : tail;
+        const toRead = isTransformStream(tail2) ? tail2.readable : tail2;
         eos(toRead, () => {
           if (onfinish) {
             const cb = onfinish;
@@ -5792,20 +5792,20 @@ var require_compose = __commonJS({
         });
       }
       if (readable) {
-        if (isNodeStream(tail)) {
-          tail.on("readable", function() {
+        if (isNodeStream(tail2)) {
+          tail2.on("readable", function() {
             if (onreadable) {
               const cb = onreadable;
               onreadable = null;
               cb();
             }
           });
-          tail.on("end", function() {
+          tail2.on("end", function() {
             d.push(null);
           });
           d._read = function() {
             while (true) {
-              const buf = tail.read();
+              const buf = tail2.read();
               if (buf === null) {
                 onreadable = d._read;
                 return;
@@ -5815,8 +5815,8 @@ var require_compose = __commonJS({
               }
             }
           };
-        } else if (isWebStream(tail)) {
-          const readable2 = isTransformStream(tail) ? tail.readable : tail;
+        } else if (isWebStream(tail2)) {
+          const readable2 = isTransformStream(tail2) ? tail2.readable : tail2;
           const reader = readable2.getReader();
           d._read = async function() {
             while (true) {
@@ -5847,8 +5847,8 @@ var require_compose = __commonJS({
           callback(err);
         } else {
           onclose = callback;
-          if (isNodeStream(tail)) {
-            destroyer(tail, err);
+          if (isNodeStream(tail2)) {
+            destroyer(tail2, err);
           }
         }
       };
@@ -6612,7 +6612,7 @@ var require_BufferList = __commonJS({
       const copy2 = !!dst;
       const off = this._offset(srcStart);
       const len = srcEnd - srcStart;
-      let bytes = len;
+      let bytes2 = len;
       let bufoff = copy2 && dstStart || 0;
       let start = off[1];
       if (srcStart === 0 && srcEnd === this.length) {
@@ -6625,23 +6625,23 @@ var require_BufferList = __commonJS({
         }
         return dst;
       }
-      if (bytes <= this._bufs[off[0]].length - start) {
-        return copy2 ? this._bufs[off[0]].copy(dst, dstStart, start, start + bytes) : this._bufs[off[0]].slice(start, start + bytes);
+      if (bytes2 <= this._bufs[off[0]].length - start) {
+        return copy2 ? this._bufs[off[0]].copy(dst, dstStart, start, start + bytes2) : this._bufs[off[0]].slice(start, start + bytes2);
       }
       if (!copy2) {
         dst = Buffer2.allocUnsafe(len);
       }
       for (let i = off[0]; i < this._bufs.length; i++) {
         const l = this._bufs[i].length - start;
-        if (bytes > l) {
+        if (bytes2 > l) {
           this._bufs[i].copy(dst, bufoff, start);
           bufoff += l;
         } else {
-          this._bufs[i].copy(dst, bufoff, start, start + bytes);
+          this._bufs[i].copy(dst, bufoff, start, start + bytes2);
           bufoff += l;
           break;
         }
-        bytes -= l;
+        bytes2 -= l;
         if (start) {
           start = 0;
         }
@@ -6677,17 +6677,17 @@ var require_BufferList = __commonJS({
     BufferList.prototype.toString = function toString(encoding, start, end) {
       return this.slice(start, end).toString(encoding);
     };
-    BufferList.prototype.consume = function consume(bytes) {
-      bytes = Math.trunc(bytes);
-      if (Number.isNaN(bytes) || bytes <= 0) return this;
+    BufferList.prototype.consume = function consume(bytes2) {
+      bytes2 = Math.trunc(bytes2);
+      if (Number.isNaN(bytes2) || bytes2 <= 0) return this;
       while (this._bufs.length) {
-        if (bytes >= this._bufs[0].length) {
-          bytes -= this._bufs[0].length;
+        if (bytes2 >= this._bufs[0].length) {
+          bytes2 -= this._bufs[0].length;
           this.length -= this._bufs[0].length;
           this._bufs.shift();
         } else {
-          this._bufs[0] = this._bufs[0].slice(bytes);
-          this.length -= bytes;
+          this._bufs[0] = this._bufs[0].slice(bytes2);
+          this.length -= bytes2;
           break;
         }
       }
@@ -7237,13 +7237,13 @@ var require_ms = __commonJS({
         "val is not a non-empty string or a valid number. val=" + JSON.stringify(val)
       );
     };
-    function parse(str) {
-      str = String(str);
-      if (str.length > 100) {
+    function parse(str2) {
+      str2 = String(str2);
+      if (str2.length > 100) {
         return;
       }
       var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
-        str
+        str2
       );
       if (!match) {
         return;
@@ -7844,7 +7844,7 @@ var require_node = __commonJS({
     var { formatters } = module2.exports;
     formatters.o = function(v) {
       this.inspectOpts.colors = this.useColors;
-      return util.inspect(v, this.inspectOpts).split("\n").map((str) => str.trim()).join(" ");
+      return util.inspect(v, this.inspectOpts).split("\n").map((str2) => str2.trim()).join(" ");
     };
     formatters.O = function(v) {
       this.inspectOpts.colors = this.useColors;
@@ -7870,7 +7870,7 @@ var require_parser = __commonJS({
     var bl = require_bl();
     var { EventEmitter: EventEmitter2 } = require("events");
     var Packet = require_packet();
-    var constants = require_constants();
+    var constants2 = require_constants();
     var debug = require_src()("mqtt-packet:parser");
     var Parser = class _Parser extends EventEmitter2 {
       constructor() {
@@ -7911,19 +7911,19 @@ var require_parser = __commonJS({
       }
       _parseHeader() {
         const zero = this._list.readUInt8(0);
-        const cmdIndex = zero >> constants.CMD_SHIFT;
-        this.packet.cmd = constants.types[cmdIndex];
+        const cmdIndex = zero >> constants2.CMD_SHIFT;
+        this.packet.cmd = constants2.types[cmdIndex];
         const headerFlags = zero & 15;
-        const requiredHeaderFlags = constants.requiredHeaderFlags[cmdIndex];
+        const requiredHeaderFlags = constants2.requiredHeaderFlags[cmdIndex];
         if (requiredHeaderFlags != null && headerFlags !== requiredHeaderFlags) {
-          return this._emitError(new Error(constants.requiredHeaderFlagsErrors[cmdIndex]));
+          return this._emitError(new Error(constants2.requiredHeaderFlagsErrors[cmdIndex]));
         }
-        this.packet.retain = (zero & constants.RETAIN_MASK) !== 0;
-        this.packet.qos = zero >> constants.QOS_SHIFT & constants.QOS_MASK;
+        this.packet.retain = (zero & constants2.RETAIN_MASK) !== 0;
+        this.packet.qos = zero >> constants2.QOS_SHIFT & constants2.QOS_MASK;
         if (this.packet.qos > 2) {
           return this._emitError(new Error("Packet must not have both QoS bits set to 1"));
         }
-        this.packet.dup = (zero & constants.DUP_MASK) !== 0;
+        this.packet.dup = (zero & constants2.DUP_MASK) !== 0;
         debug("_parseHeader: packet: %o", this.packet);
         this._list.consume(1);
         return true;
@@ -8017,11 +8017,11 @@ var require_parser = __commonJS({
         if (this._list.readUInt8(this._pos) & 1) {
           return this._emitError(new Error("Connect flag bit 0 must be 0, but got 1"));
         }
-        flags.username = this._list.readUInt8(this._pos) & constants.USERNAME_MASK;
-        flags.password = this._list.readUInt8(this._pos) & constants.PASSWORD_MASK;
-        flags.will = this._list.readUInt8(this._pos) & constants.WILL_FLAG_MASK;
-        const willRetain = !!(this._list.readUInt8(this._pos) & constants.WILL_RETAIN_MASK);
-        const willQos = (this._list.readUInt8(this._pos) & constants.WILL_QOS_MASK) >> constants.WILL_QOS_SHIFT;
+        flags.username = this._list.readUInt8(this._pos) & constants2.USERNAME_MASK;
+        flags.password = this._list.readUInt8(this._pos) & constants2.PASSWORD_MASK;
+        flags.will = this._list.readUInt8(this._pos) & constants2.WILL_FLAG_MASK;
+        const willRetain = !!(this._list.readUInt8(this._pos) & constants2.WILL_RETAIN_MASK);
+        const willQos = (this._list.readUInt8(this._pos) & constants2.WILL_QOS_MASK) >> constants2.WILL_QOS_SHIFT;
         if (flags.will) {
           packet.will = {};
           packet.will.retain = willRetain;
@@ -8034,7 +8034,7 @@ var require_parser = __commonJS({
             return this._emitError(new Error("Will QoS must be set to zero when Will Flag is set to 0"));
           }
         }
-        packet.clean = (this._list.readUInt8(this._pos) & constants.CLEAN_SESSION_MASK) !== 0;
+        packet.clean = (this._list.readUInt8(this._pos) & constants2.CLEAN_SESSION_MASK) !== 0;
         this._pos++;
         packet.keepalive = this._parseNum();
         if (packet.keepalive === -1) return this._emitError(new Error("Packet too short"));
@@ -8087,7 +8087,7 @@ var require_parser = __commonJS({
         if (flags > 1) {
           return this._emitError(new Error("Invalid connack flags, bits 7-1 must be set to 0"));
         }
-        packet.sessionPresent = !!(flags & constants.SESSIONPRESENT_MASK);
+        packet.sessionPresent = !!(flags & constants2.SESSIONPRESENT_MASK);
         if (this.settings.protocolVersion === 5) {
           if (this._list.length >= 2) {
             packet.reasonCode = this._list.readUInt8(this._pos++);
@@ -8163,13 +8163,13 @@ var require_parser = __commonJS({
               return this._emitError(new Error("Invalid subscribe topic flag bits, bits 7-2 must be 0"));
             }
           }
-          qos = options & constants.SUBSCRIBE_OPTIONS_QOS_MASK;
+          qos = options & constants2.SUBSCRIBE_OPTIONS_QOS_MASK;
           if (qos > 2) {
             return this._emitError(new Error("Invalid subscribe QoS, must be <= 2"));
           }
-          nl = (options >> constants.SUBSCRIBE_OPTIONS_NL_SHIFT & constants.SUBSCRIBE_OPTIONS_NL_MASK) !== 0;
-          rap = (options >> constants.SUBSCRIBE_OPTIONS_RAP_SHIFT & constants.SUBSCRIBE_OPTIONS_RAP_MASK) !== 0;
-          rh = options >> constants.SUBSCRIBE_OPTIONS_RH_SHIFT & constants.SUBSCRIBE_OPTIONS_RH_MASK;
+          nl = (options >> constants2.SUBSCRIBE_OPTIONS_NL_SHIFT & constants2.SUBSCRIBE_OPTIONS_NL_MASK) !== 0;
+          rap = (options >> constants2.SUBSCRIBE_OPTIONS_RAP_SHIFT & constants2.SUBSCRIBE_OPTIONS_RAP_MASK) !== 0;
+          rh = options >> constants2.SUBSCRIBE_OPTIONS_RH_SHIFT & constants2.SUBSCRIBE_OPTIONS_RH_MASK;
           if (rh > 2) {
             return this._emitError(new Error("Invalid retain handling, must be <= 2"));
           }
@@ -8206,7 +8206,7 @@ var require_parser = __commonJS({
         while (this._pos < this.packet.length) {
           const code = this._list.readUInt8(this._pos++);
           if (this.settings.protocolVersion === 5) {
-            if (!constants.MQTT5_SUBACK_CODES[code]) {
+            if (!constants2.MQTT5_SUBACK_CODES[code]) {
               return this._emitError(new Error("Invalid suback code"));
             }
           } else {
@@ -8258,7 +8258,7 @@ var require_parser = __commonJS({
           packet.granted = [];
           while (this._pos < this.packet.length) {
             const code = this._list.readUInt8(this._pos++);
-            if (!constants.MQTT5_UNSUBACK_CODES[code]) {
+            if (!constants2.MQTT5_UNSUBACK_CODES[code]) {
               return this._emitError(new Error("Invalid unsuback code"));
             }
             this.packet.granted.push(code);
@@ -8276,13 +8276,13 @@ var require_parser = __commonJS({
             switch (this.packet.cmd) {
               case "puback":
               case "pubrec":
-                if (!constants.MQTT5_PUBACK_PUBREC_CODES[packet.reasonCode]) {
+                if (!constants2.MQTT5_PUBACK_PUBREC_CODES[packet.reasonCode]) {
                   return this._emitError(new Error("Invalid " + this.packet.cmd + " reason code"));
                 }
                 break;
               case "pubrel":
               case "pubcomp":
-                if (!constants.MQTT5_PUBREL_PUBCOMP_CODES[packet.reasonCode]) {
+                if (!constants2.MQTT5_PUBREL_PUBCOMP_CODES[packet.reasonCode]) {
                   return this._emitError(new Error("Invalid " + this.packet.cmd + " reason code"));
                 }
                 break;
@@ -8307,7 +8307,7 @@ var require_parser = __commonJS({
         if (this.settings.protocolVersion === 5) {
           if (this._list.length > 0) {
             packet.reasonCode = this._parseByte();
-            if (!constants.MQTT5_DISCONNECT_CODES[packet.reasonCode]) {
+            if (!constants2.MQTT5_DISCONNECT_CODES[packet.reasonCode]) {
               this._emitError(new Error("Invalid disconnect reason code"));
             }
           } else {
@@ -8329,7 +8329,7 @@ var require_parser = __commonJS({
           return this._emitError(new Error("Not supported auth packet for this version MQTT"));
         }
         packet.reasonCode = this._parseByte();
-        if (!constants.MQTT5_AUTH_CODES[packet.reasonCode]) {
+        if (!constants2.MQTT5_AUTH_CODES[packet.reasonCode]) {
           return this._emitError(new Error("Invalid auth reason code"));
         }
         const properties = this._parseProperties();
@@ -8391,33 +8391,33 @@ var require_parser = __commonJS({
       _parseVarByteNum(fullInfoFlag) {
         debug("_parseVarByteNum");
         const maxBytes = 4;
-        let bytes = 0;
+        let bytes2 = 0;
         let mul = 1;
         let value = 0;
         let result = false;
         let current;
         const padding = this._pos ? this._pos : 0;
-        while (bytes < maxBytes && padding + bytes < this._list.length) {
-          current = this._list.readUInt8(padding + bytes++);
-          value += mul * (current & constants.VARBYTEINT_MASK);
+        while (bytes2 < maxBytes && padding + bytes2 < this._list.length) {
+          current = this._list.readUInt8(padding + bytes2++);
+          value += mul * (current & constants2.VARBYTEINT_MASK);
           mul *= 128;
-          if ((current & constants.VARBYTEINT_FIN_MASK) === 0) {
+          if ((current & constants2.VARBYTEINT_FIN_MASK) === 0) {
             result = true;
             break;
           }
-          if (this._list.length <= bytes) {
+          if (this._list.length <= bytes2) {
             break;
           }
         }
-        if (!result && bytes === maxBytes && this._list.length >= bytes) {
+        if (!result && bytes2 === maxBytes && this._list.length >= bytes2) {
           this._emitError(new Error("Invalid variable byte integer"));
         }
         if (padding) {
-          this._pos += bytes;
+          this._pos += bytes2;
         }
         if (result) {
           if (fullInfoFlag) {
-            result = { bytes, value };
+            result = { bytes: bytes2, value };
           } else {
             result = value;
           }
@@ -8477,7 +8477,7 @@ var require_parser = __commonJS({
             this._emitError(new Error("Cannot parse property code type"));
             return false;
           }
-          const name = constants.propertiesCodes[type];
+          const name = constants2.propertiesCodes[type];
           if (!name) {
             this._emitError(new Error("Unknown property"));
             return false;
@@ -8486,7 +8486,7 @@ var require_parser = __commonJS({
             if (!result[name]) {
               result[name] = /* @__PURE__ */ Object.create(null);
             }
-            const currentUserProperty = this._parseByType(constants.propertiesTypes[name]);
+            const currentUserProperty = this._parseByType(constants2.propertiesTypes[name]);
             if (result[name][currentUserProperty.name]) {
               if (Array.isArray(result[name][currentUserProperty.name])) {
                 result[name][currentUserProperty.name].push(currentUserProperty.value);
@@ -8502,13 +8502,13 @@ var require_parser = __commonJS({
           }
           if (result[name]) {
             if (Array.isArray(result[name])) {
-              result[name].push(this._parseByType(constants.propertiesTypes[name]));
+              result[name].push(this._parseByType(constants2.propertiesTypes[name]));
             } else {
               result[name] = [result[name]];
-              result[name].push(this._parseByType(constants.propertiesTypes[name]));
+              result[name].push(this._parseByType(constants2.propertiesTypes[name]));
             }
           } else {
-            result[name] = this._parseByType(constants.propertiesTypes[name]);
+            result[name] = this._parseByType(constants2.propertiesTypes[name]);
           }
         }
         return result;
@@ -20210,12 +20210,12 @@ var require_common2 = __commonJS({
       }
       return firstZero;
     }
-    function assertByteArray(bytes, byteCount, family, minimum) {
-      if (bytes.length !== byteCount) {
+    function assertByteArray(bytes2, byteCount, family, minimum) {
+      if (bytes2.length !== byteCount) {
         throw new address_error_1.AddressError(`${family} addresses require exactly ${byteCount} bytes`);
       }
-      for (let i = 0; i < bytes.length; i++) {
-        if (!Number.isInteger(bytes[i]) || bytes[i] < minimum || bytes[i] > 255) {
+      for (let i = 0; i < bytes2.length; i++) {
+        if (!Number.isInteger(bytes2[i]) || bytes2[i] < minimum || bytes2[i] > 255) {
           throw new address_error_1.AddressError(`All bytes must be integers between ${minimum} and 255`);
         }
       }
@@ -20312,13 +20312,13 @@ var require_ipv4 = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.Address4 = void 0;
     var common = __importStar(require_common2());
-    var constants = __importStar(require_constants4());
+    var constants2 = __importStar(require_constants4());
     var address_error_1 = require_address_error();
-    var isCorrect4 = common.isCorrect(constants.BITS);
+    var isCorrect4 = common.isCorrect(constants2.BITS);
     var Address4 = class _Address4 {
       constructor(address) {
         this.addressMinusSuffix = "";
-        this.groups = constants.GROUPS;
+        this.groups = constants2.GROUPS;
         this.parsedAddress = [];
         this.parsedSubnet = "";
         this.subnet = "/32";
@@ -20328,17 +20328,17 @@ var require_ipv4 = __commonJS({
         this.isInSubnet = common.isInSubnet;
         this.isHostInSubnet = common.isHostInSubnet;
         this.address = address;
-        const subnet = constants.RE_SUBNET_STRING.exec(address);
+        const subnet = constants2.RE_SUBNET_STRING.exec(address);
         if (subnet) {
           this.parsedSubnet = subnet[0].replace("/", "");
           this.subnetMask = parseInt(this.parsedSubnet, 10);
           this.subnet = `/${this.subnetMask}`;
-          if (this.subnetMask < 0 || this.subnetMask > constants.BITS) {
+          if (this.subnetMask < 0 || this.subnetMask > constants2.BITS) {
             throw new address_error_1.AddressError("Invalid subnet mask.");
           }
-          address = address.replace(constants.RE_SUBNET_STRING, "");
+          address = address.replace(constants2.RE_SUBNET_STRING, "");
         }
-        const longest = constants.GROUPS * 4 - 1;
+        const longest = constants2.GROUPS * 4 - 1;
         if (address.length > longest) {
           throw new address_error_1.AddressError(`IPv4 addresses are at most ${longest} characters.`);
         }
@@ -20371,7 +20371,7 @@ var require_ipv4 = __commonJS({
         if (groups.some((group) => /^0\d/.test(group))) {
           throw new address_error_1.AddressError("IPv4 addresses can't have leading zeroes.");
         }
-        if (!address.match(constants.RE_ADDRESS)) {
+        if (!address.match(constants2.RE_ADDRESS)) {
           throw new address_error_1.AddressError("Invalid IPv4 address.");
         }
         return groups;
@@ -20394,7 +20394,7 @@ var require_ipv4 = __commonJS({
        * address.subnetMask; // 24
        */
       static fromAddressAndMask(address, mask) {
-        const bits = common.prefixLengthFromMask(new _Address4(mask).bigInt(), constants.BITS);
+        const bits = common.prefixLengthFromMask(new _Address4(mask).bigInt(), constants2.BITS);
         return new _Address4(`${address}/${bits}`);
       }
       /**
@@ -20408,9 +20408,9 @@ var require_ipv4 = __commonJS({
        */
       static fromAddressAndWildcardMask(address, wildcardMask) {
         const wildcard = new _Address4(wildcardMask).bigInt();
-        const allOnes = (BigInt(1) << BigInt(constants.BITS)) - BigInt(1);
+        const allOnes = (BigInt(1) << BigInt(constants2.BITS)) - BigInt(1);
         const mask = wildcard ^ allOnes;
-        const bits = common.prefixLengthFromMask(mask, constants.BITS);
+        const bits = common.prefixLengthFromMask(mask, constants2.BITS);
         return new _Address4(`${address}/${bits}`);
       }
       /**
@@ -20428,7 +20428,7 @@ var require_ipv4 = __commonJS({
        */
       static fromWildcard(input) {
         const groups = input.split(".");
-        if (groups.length !== constants.GROUPS) {
+        if (groups.length !== constants2.GROUPS) {
           throw new address_error_1.AddressError("Wildcard pattern must have 4 octets");
         }
         let firstWildcard = -1;
@@ -20443,7 +20443,7 @@ var require_ipv4 = __commonJS({
         }
         const trailing = firstWildcard === -1 ? 0 : groups.length - firstWildcard;
         const replaced = groups.map((g) => g === "*" ? "0" : g);
-        const subnetBits = constants.BITS - trailing * 8;
+        const subnetBits = constants2.BITS - trailing * 8;
         return new _Address4(`${replaced.join(".")}/${subnetBits}`);
       }
       /**
@@ -20489,7 +20489,7 @@ var require_ipv4 = __commonJS({
        * address.correctForm(); // '192.0.2.42'
        */
       static fromArpa(arpaFormAddress) {
-        const longest = constants.GROUPS * 4 - 1 + "/32".length + ".in-addr.arpa.".length;
+        const longest = constants2.GROUPS * 4 - 1 + "/32".length + ".in-addr.arpa.".length;
         if (arpaFormAddress.length > longest) {
           throw new address_error_1.AddressError(`in-addr.arpa names are at most ${longest} characters.`);
         }
@@ -20520,7 +20520,7 @@ var require_ipv4 = __commonJS({
       toGroup6() {
         const output = [];
         let i;
-        for (i = 0; i < constants.GROUPS; i += 2) {
+        for (i = 0; i < constants2.GROUPS; i += 2) {
           output.push(`${common.stringToPaddedHex(this.parsedAddress[i])}${common.stringToPaddedHex(this.parsedAddress[i + 1])}`);
         }
         return output.join(":");
@@ -20537,7 +20537,7 @@ var require_ipv4 = __commonJS({
        * @returns {bigint}
        */
       _startAddress() {
-        return BigInt(`0b${this.mask() + "0".repeat(constants.BITS - this.subnetMask)}`);
+        return BigInt(`0b${this.mask() + "0".repeat(constants2.BITS - this.subnetMask)}`);
       }
       /**
        * The first address in the range given by this address' subnet.
@@ -20567,7 +20567,7 @@ var require_ipv4 = __commonJS({
        * new Address4('10.0.0.0/24').offset(1).correctForm(); // '10.0.0.1'
        */
       offset(n) {
-        return _Address4.fromBigInt(common.offsetBigInt(this.bigInt(), n, constants.BITS, "IPv4")).withSubnetMask(this.subnetMask);
+        return _Address4.fromBigInt(common.offsetBigInt(this.bigInt(), n, constants2.BITS, "IPv4")).withSubnetMask(this.subnetMask);
       }
       /**
        * Returns the network that follows this address's network: the address after
@@ -20578,7 +20578,7 @@ var require_ipv4 = __commonJS({
        * new Address4('10.0.0.0/24').nextNetwork().networkForm(); // '10.0.1.0/24'
        */
       nextNetwork() {
-        return _Address4.fromBigInt(common.offsetBigInt(this._endAddress(), 1, constants.BITS, "IPv4")).withSubnetMask(this.subnetMask);
+        return _Address4.fromBigInt(common.offsetBigInt(this._endAddress(), 1, constants2.BITS, "IPv4")).withSubnetMask(this.subnetMask);
       }
       withSubnetMask(subnetMask) {
         return new _Address4(`${this.correctForm()}/${subnetMask}`);
@@ -20588,7 +20588,7 @@ var require_ipv4 = __commonJS({
        * @returns {bigint}
        */
       _endAddress() {
-        return BigInt(`0b${this.mask() + "1".repeat(constants.BITS - this.subnetMask)}`);
+        return BigInt(`0b${this.mask() + "1".repeat(constants2.BITS - this.subnetMask)}`);
       }
       /**
        * The last address in the range given by this address' subnet
@@ -20613,7 +20613,7 @@ var require_ipv4 = __commonJS({
        * @returns {Address4}
        */
       subnetMaskAddress() {
-        return _Address4.fromBigInt(BigInt(`0b${"1".repeat(this.subnetMask)}${"0".repeat(constants.BITS - this.subnetMask)}`));
+        return _Address4.fromBigInt(BigInt(`0b${"1".repeat(this.subnetMask)}${"0".repeat(constants2.BITS - this.subnetMask)}`));
       }
       /**
        * The Cisco-style wildcard mask, e.g. `0.0.0.255` for a `/24`. This is
@@ -20622,7 +20622,7 @@ var require_ipv4 = __commonJS({
        * @returns {Address4}
        */
       wildcardMask() {
-        return _Address4.fromBigInt(BigInt(`0b${"0".repeat(this.subnetMask)}${"1".repeat(constants.BITS - this.subnetMask)}`));
+        return _Address4.fromBigInt(BigInt(`0b${"0".repeat(this.subnetMask)}${"1".repeat(constants2.BITS - this.subnetMask)}`));
       }
       /**
        * The network address in CIDR string form, e.g. `192.168.1.0/24` for
@@ -20655,9 +20655,9 @@ var require_ipv4 = __commonJS({
        * @param {Array<number>} bytes - an array of 4 bytes (0-255)
        * @returns {Address4}
        */
-      static fromByteArray(bytes) {
-        common.assertByteArray(bytes, 4, "IPv4", 0);
-        return this.fromUnsignedByteArray(bytes);
+      static fromByteArray(bytes2) {
+        common.assertByteArray(bytes2, 4, "IPv4", 0);
+        return this.fromUnsignedByteArray(bytes2);
       }
       /**
        * Convert an unsigned byte array to an Address4 object. Throws
@@ -20669,11 +20669,11 @@ var require_ipv4 = __commonJS({
        * @param {Array<number>} bytes - an array of 4 unsigned bytes (0-255)
        * @returns {Address4}
        */
-      static fromUnsignedByteArray(bytes) {
-        if (bytes.length !== 4) {
+      static fromUnsignedByteArray(bytes2) {
+        if (bytes2.length !== 4) {
           throw new address_error_1.AddressError("IPv4 addresses require exactly 4 bytes");
         }
-        const address = bytes.join(".");
+        const address = bytes2.join(".");
         return new _Address4(address);
       }
       /**
@@ -20803,7 +20803,7 @@ var require_ipv4 = __commonJS({
        */
       binaryZeroPad() {
         if (this._binaryZeroPad === void 0) {
-          this._binaryZeroPad = this.bigInt().toString(2).padStart(constants.BITS, "0");
+          this._binaryZeroPad = this.bigInt().toString(2).padStart(constants2.BITS, "0");
         }
         return this._binaryZeroPad;
       }
@@ -20818,7 +20818,7 @@ var require_ipv4 = __commonJS({
        */
       groupForV6() {
         const segments = this.parsedAddress;
-        return this.correctForm().replace(constants.RE_ADDRESS, `<span class="hover-group group-v4 group-6">${segments.slice(0, 2).join(".")}</span>.<span class="hover-group group-v4 group-7">${segments.slice(2, 4).join(".")}</span>`);
+        return this.correctForm().replace(constants2.RE_ADDRESS, `<span class="hover-group group-v4 group-6">${segments.slice(0, 2).join(".")}</span>.<span class="hover-group group-v4 group-7">${segments.slice(2, 4).join(".")}</span>`);
       }
     };
     exports2.Address4 = Address4;
@@ -20840,7 +20840,7 @@ var require_ipv4 = __commonJS({
     ];
     var BENCHMARKING_V4 = new Address4("198.18.0.0/15");
     var RESERVED_V4 = new Address4("240.0.0.0/4");
-    var SPECIAL_PURPOSE_V4 = constants.SPECIAL_PURPOSE.map(([cidr, , reachable]) => ({
+    var SPECIAL_PURPOSE_V4 = constants2.SPECIAL_PURPOSE.map(([cidr, , reachable]) => ({
       subnet: new Address4(cidr),
       reachable
     }));
@@ -21969,11 +21969,11 @@ var require_ipv6 = __commonJS({
        */
       toByteArray() {
         const value = this.bigInt().toString(16).padStart(constants6.BITS / 4, "0");
-        const bytes = [];
+        const bytes2 = [];
         for (let i = 0, length = value.length; i < length; i += 2) {
-          bytes.push(parseInt(value.substring(i, i + 2), 16));
+          bytes2.push(parseInt(value.substring(i, i + 2), 16));
         }
-        return bytes;
+        return bytes2;
       }
       /**
        * Return an unsigned byte array.
@@ -21995,9 +21995,9 @@ var require_ipv6 = __commonJS({
        * To convert from a Node.js `Buffer`, spread it: `Address6.fromByteArray([...buf])`.
        * @returns {Address6}
        */
-      static fromByteArray(bytes) {
-        common.assertByteArray(bytes, 16, "IPv6", -128);
-        return this.fromUnsignedByteArray(bytes.map(unsignByte));
+      static fromByteArray(bytes2) {
+        common.assertByteArray(bytes2, 16, "IPv6", -128);
+        return this.fromUnsignedByteArray(bytes2.map(unsignByte));
       }
       /**
        * Convert an unsigned byte array to an Address6 object.
@@ -22007,13 +22007,13 @@ var require_ipv6 = __commonJS({
        * To convert from a Node.js `Buffer`, spread it: `Address6.fromUnsignedByteArray([...buf])`.
        * @returns {Address6}
        */
-      static fromUnsignedByteArray(bytes) {
-        common.assertByteArray(bytes, 16, "IPv6", 0);
+      static fromUnsignedByteArray(bytes2) {
+        common.assertByteArray(bytes2, 16, "IPv6", 0);
         const BYTE_MAX = BigInt("256");
         let result = BigInt("0");
         let multiplier = BigInt("1");
-        for (let i = bytes.length - 1; i >= 0; i--) {
-          result += multiplier * BigInt(bytes[i].toString(10));
+        for (let i = bytes2.length - 1; i >= 0; i--) {
+          result += multiplier * BigInt(bytes2[i].toString(10));
           multiplier *= BYTE_MAX;
         }
         return _Address6.fromBigInt(result);
@@ -24141,9 +24141,9 @@ var require_build2 = __commonJS({
 
 // src/agent.ts
 var import_node_crypto = require("node:crypto");
-var import_promises4 = require("node:fs/promises");
-var import_node_os2 = __toESM(require("node:os"), 1);
-var import_node_path2 = require("node:path");
+var import_promises5 = require("node:fs/promises");
+var import_node_os3 = __toESM(require("node:os"), 1);
+var import_node_path3 = require("node:path");
 
 // src/lib/protocol.ts
 var PROTOCOL_VERSION = 1;
@@ -24489,10 +24489,10 @@ function countErrors(text, top = 10) {
       kernel++;
       continue;
     }
-    const unit = String(e._SYSTEMD_UNIT || e.SYSLOG_IDENTIFIER || "unbekannt");
-    counts.set(unit, (counts.get(unit) ?? 0) + 1);
+    const unit2 = String(e._SYSTEMD_UNIT || e.SYSLOG_IDENTIFIER || "unbekannt");
+    counts.set(unit2, (counts.get(unit2) ?? 0) + 1);
   }
-  const errors = [...counts.entries()].map(([unit, count]) => ({ unit, count })).sort((a, b) => b.count - a.count || a.unit.localeCompare(b.unit)).slice(0, top);
+  const errors = [...counts.entries()].map(([unit2, count]) => ({ unit: unit2, count })).sort((a, b) => b.count - a.count || a.unit.localeCompare(b.unit)).slice(0, top);
   return { errors, kernelErrors: kernel };
 }
 function countSshFailed(text) {
@@ -24514,10 +24514,10 @@ async function journalSummary() {
   );
   return { ...countErrors(errors.stdout), sshFailed: countSshFailed(ssh.stdout) };
 }
-async function journalLines(minutes, unit) {
+async function journalLines(minutes, unit2) {
   const args = ["--since", `-${Math.max(1, Math.round(minutes))}min`, "-o", "cat", "-q", "--no-pager", "-n", MAX_LINES];
-  if (unit) {
-    args.push("-u", unit);
+  if (unit2) {
+    args.push("-u", unit2);
   }
   const r = await run("journalctl", args, { timeout: 6e4 });
   if (r.error || NOT_ALLOWED.test(r.stderr)) {
@@ -24671,12 +24671,12 @@ async function file(c, now) {
 }
 async function journal(c) {
   const minutes = c.windowMinutes ?? 60;
-  const lines = await journalLines(minutes, c.target);
-  if (!lines) {
+  const lines2 = await journalLines(minutes, c.target);
+  if (!lines2) {
     return { state: "fail", text: "Journal nicht lesbar" };
   }
-  const pattern = new RegExp(c.text, "i");
-  const n = lines.filter((l) => pattern.test(l)).length;
+  const pattern2 = new RegExp(c.text, "i");
+  const n = lines2.filter((l) => pattern2.test(l)).length;
   const max = c.maxCount ?? 0;
   return { state: n > max ? "fail" : "ok", text: `${n} Treffer in ${minutes} min` };
 }
@@ -24740,8 +24740,8 @@ function consoleUser() {
     return String(process.getuid?.() ?? "");
   }
 }
-function parentOf(stat3) {
-  const rest = stat3.slice(stat3.lastIndexOf(")") + 2).split(" ");
+function parentOf(stat4) {
+  const rest = stat4.slice(stat4.lastIndexOf(")") + 2).split(" ");
   return parseInt(rest[1], 10);
 }
 function findTerminal(scriptPid) {
@@ -24895,11 +24895,11 @@ function startShell(stream, opts) {
 
 // src/root.ts
 var import_node_child_process3 = require("node:child_process");
-var NONE = { apt: false, reboot: false, pm2: false, docker: false };
+var NONE = { apt: false, reboot: false, pm2: false, docker: false, logs: false };
 var PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
 function parseAbilities(text) {
   const on = (key) => new RegExp(`^${key}=1$`, "m").test(text);
-  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker") };
+  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker"), logs: on("logs") };
 }
 function parseDocker(text) {
   const list = [];
@@ -24937,6 +24937,10 @@ var Root = class {
   helper;
   call(args, timeout = 6e4) {
     return run("sudo", ["-n", this.helper, ...args], { timeout });
+  }
+  /** A reading action of the helper for a tool of the AI (docker-logs, pm2-logs, nginx-test, certbot) */
+  read(args) {
+    return run("sudo", ["-n", this.helper, ...args], { timeout: 9e4, maxBuffer: 32 * 1024 * 1024 });
   }
   async abilities() {
     const r = await this.call(["can"], 15e3);
@@ -25090,17 +25094,598 @@ async function ntpSynced() {
   return v === "yes" ? true : v === "no" ? false : null;
 }
 
+// src/tools.ts
+var import_node_fs3 = require("node:fs");
+var import_promises4 = require("node:fs/promises");
+var import_node_os2 = __toESM(require("node:os"), 1);
+var import_node_path2 = require("node:path");
+var import_node_zlib = require("node:zlib");
+var MAX_TOOL_TEXT = 200 * 1024;
+var MAX_LINES2 = 2e3;
+var MAX_FILE = 64 * 1024 * 1024;
+var LOG_ROOT = "/var/log";
+var ToolError = class extends Error {
+};
+var str = (a, key) => typeof a[key] === "string" && a[key].trim() ? a[key].trim() : void 0;
+function lines(a, def = 200) {
+  const n = Number(a.lines ?? def);
+  return Number.isFinite(n) ? Math.max(1, Math.min(MAX_LINES2, Math.round(n))) : def;
+}
+function unit(a, key = "unit", required = true) {
+  const u = str(a, key);
+  if (!u) {
+    if (required) {
+      throw new ToolError(`${key} fehlt`);
+    }
+    return void 0;
+  }
+  if (!UNIT_NAME.test(u)) {
+    throw new ToolError(`Ung\xFCltiger Name einer Unit: ${u}`);
+  }
+  return u;
+}
+function pattern(a) {
+  const g = str(a, "grep");
+  if (!g) {
+    return null;
+  }
+  if (g.length > 300) {
+    throw new ToolError("grep: h\xF6chstens 300 Zeichen");
+  }
+  try {
+    return new RegExp(g, "i");
+  } catch {
+    throw new ToolError(`grep ist kein g\xFCltiger regul\xE4rer Ausdruck: ${g}`);
+  }
+}
+var JOURNAL_TIME = /^(-?\d{1,5}\s?(s|sec|min|m|h|d|day|days|w|weeks?)|now|today|yesterday|\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)$/;
+function journalTime(a, key) {
+  const t = str(a, key);
+  if (t && !JOURNAL_TIME.test(t)) {
+    throw new ToolError(`${key}: Zeit wie "-2h", "-30min", "today" oder "2026-11-15 08:00"`);
+  }
+  return t;
+}
+var PRIORITIES = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"];
+function tail(text, n, re) {
+  let all = text.split("\n");
+  if (all.length && all[all.length - 1] === "") {
+    all.pop();
+  }
+  if (re) {
+    all = all.filter((l) => re.test(l));
+  }
+  const out = all.slice(-n);
+  return `${all.length > n ? `[${all.length - n} \xE4ltere Zeilen ausgelassen]
+` : ""}${out.join("\n")}`;
+}
+function bytes(n) {
+  return n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`;
+}
+function duration(sec) {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor(sec % 86400 / 3600);
+  const m = Math.floor(sec % 3600 / 60);
+  return `${d ? `${d} d ` : ""}${h} h ${m} min`;
+}
+async function program(file2, args, timeout = 3e4) {
+  const r = await run(file2, args, { timeout });
+  if (r.error) {
+    throw new ToolError(r.error === "ENOENT" ? `${file2} ist auf dem Server nicht installiert` : `${file2}: ${r.error}`);
+  }
+  return (r.stdout + (r.code !== 0 && r.stderr ? `
+${r.stderr}` : "")).trim();
+}
+async function logPath(path) {
+  if (!path.startsWith("/")) {
+    throw new ToolError("Pfad muss absolut sein, z. B. /var/log/nginx/error.log");
+  }
+  let real;
+  try {
+    real = await (0, import_promises4.realpath)(path);
+  } catch (e) {
+    throw new ToolError(e.code === "ENOENT" ? `${path} gibt es nicht` : `${path}: ${e.message}`);
+  }
+  if (real !== LOG_ROOT && !real.startsWith(`${LOG_ROOT}/`)) {
+    throw new ToolError(`Nur Dateien unter ${LOG_ROOT}; f\xFCr den Rest read_journal`);
+  }
+  return real;
+}
+function buildTools(deps) {
+  const ro = { readOnlyHint: true, openWorldHint: false };
+  const tools = [
+    {
+      def: {
+        name: "overview",
+        title: "Server overview",
+        description: "Distribution, kernel, uptime, load, memory, swap, filesystems, failed units of systemd, clock and pending updates of the server.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: async () => {
+        const [rel, mem, fs, failed, ntp, apt] = await Promise.all([
+          osRelease(),
+          memInfo(),
+          mounts(),
+          failedUnits(),
+          ntpSynced(),
+          run("apt", ["list", "--upgradeable"], { timeout: 6e4 })
+        ]);
+        const [l1, l5, l15] = import_node_os2.default.loadavg();
+        const updates = apt.code === 0 ? parseUpgradeable(apt.stdout) : null;
+        return [
+          `Host: ${import_node_os2.default.hostname()}`,
+          `System: ${rel.pretty}, Kernel ${import_node_os2.default.release()}, ${import_node_os2.default.arch()}`,
+          `Uptime: ${duration(import_node_os2.default.uptime())}`,
+          `Last: ${l1.toFixed(2)} / ${l5.toFixed(2)} / ${l15.toFixed(2)} bei ${import_node_os2.default.cpus().length} CPU`,
+          `Speicher: ${bytes(mem.available)} verf\xFCgbar von ${bytes(mem.total)}; Swap ${bytes(mem.swapTotal - mem.swapFree)} belegt von ${bytes(mem.swapTotal)}`,
+          "Dateisysteme:",
+          ...fs.map((m) => `  ${m.path} (${m.device}, ${m.fstype}) ${bytes(m.size)}, ${m.usedPct} % belegt, Inodes ${m.inodesPct ?? "\u2013"} %`),
+          `Fehlgeschlagene Units: ${failed.length ? failed.join(", ") : "keine"}`,
+          `Uhr synchronisiert: ${ntp === null ? "unbekannt" : ntp ? "ja" : "nein"}`,
+          `Updates: ${updates ? `${updates.length} (davon Sicherheit: ${updates.filter((p) => p.security).length})` : "unbekannt"}`
+        ].join("\n");
+      }
+    },
+    {
+      def: {
+        name: "list_services",
+        title: "Services",
+        description: 'Services of systemd with their state. state: "failed", "running", "all" (default: all loaded services).',
+        inputSchema: {
+          type: "object",
+          properties: { state: { type: "string", enum: ["all", "running", "failed", "inactive"] } }
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const state = str(a, "state") ?? "all";
+        const args = ["list-units", "--type=service", "--all", "--plain", "--no-legend", "--no-pager"];
+        if (["running", "failed", "inactive"].includes(state)) {
+          args.push(`--state=${state}`);
+        }
+        return await program("systemctl", args) || "keine";
+      }
+    },
+    {
+      def: {
+        name: "list_timers",
+        title: "Timers",
+        description: "Timers of systemd: when each ran last and runs next (e.g. certbot.timer, apt-daily, logrotate).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: () => program("systemctl", ["list-timers", "--all", "--no-pager"])
+    },
+    {
+      def: {
+        name: "service_status",
+        title: "State of a unit",
+        description: "State of one unit of systemd (service, timer, socket): active state, result, exit code, restarts, start time, and its last journal lines.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            unit: { type: "string", description: 'e.g. "nginx", "certbot.service", "certbot.timer"' },
+            lines: { type: "number", description: "journal lines (default 30)" }
+          },
+          required: ["unit"]
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const u = unit(a);
+        const props = await program("systemctl", [
+          "show",
+          u,
+          "--no-pager",
+          "-p",
+          "Id,Description,LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainExitTimestamp,ActiveEnterTimestamp,InactiveEnterTimestamp,NRestarts,MainPID,MemoryCurrent,FragmentPath,TriggeredBy,Triggers,UnitFileState"
+        ]);
+        const log2 = await program("journalctl", ["-u", u, "-n", String(lines(a, 30)), "-o", "short-iso", "--no-pager", "-q"]);
+        return `${props}
+
+Journal:
+${log2 || "(keine Eintr\xE4ge)"}`;
+      }
+    },
+    {
+      def: {
+        name: "read_journal",
+        title: "Read the journal",
+        description: 'Lines of the journal of systemd, newest last. Filter by unit, priority (err and worse: "err"), time (since/until like "-2h", "today", "2026-11-15 08:00"), kernel messages, and a regular expression (grep, case-insensitive).',
+        inputSchema: {
+          type: "object",
+          properties: {
+            unit: { type: "string" },
+            priority: { type: "string", enum: PRIORITIES },
+            since: { type: "string", description: "default -1h" },
+            until: { type: "string" },
+            kernel: { type: "boolean" },
+            grep: { type: "string" },
+            lines: { type: "number", description: "default 200, at most 2000" }
+          }
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const u = unit(a, "unit", false);
+        const priority = str(a, "priority");
+        if (priority && !PRIORITIES.includes(priority)) {
+          throw new ToolError(`priority: eins von ${PRIORITIES.join(", ")}`);
+        }
+        const since = journalTime(a, "since") ?? "-1h";
+        const until = journalTime(a, "until");
+        const re = pattern(a);
+        const n = lines(a);
+        const args = ["-o", "short-iso", "--no-pager", "-q", `--since=${since}`, "-n", String(re ? 5e4 : n)];
+        if (until) {
+          args.push(`--until=${until}`);
+        }
+        if (u) {
+          args.push("-u", u);
+        }
+        if (priority) {
+          args.push("-p", priority);
+        }
+        if (a.kernel === true) {
+          args.push("-k");
+        }
+        return tail(await program("journalctl", args, 6e4), n, re) || "(keine Eintr\xE4ge)";
+      }
+    },
+    {
+      def: {
+        name: "list_log_files",
+        title: "Log files",
+        description: `Log files below ${LOG_ROOT} (size, time, readable for bee-linux), e.g. of nginx, apt, letsencrypt.`,
+        inputSchema: { type: "object", properties: { dir: { type: "string", description: `a folder below ${LOG_ROOT}` } } },
+        annotations: ro
+      },
+      run: async (a) => {
+        const dir = await logPath(str(a, "dir") ?? LOG_ROOT);
+        const out = [];
+        const walk = async (d, depth) => {
+          let names;
+          try {
+            names = (await (0, import_promises4.readdir)(d)).sort();
+          } catch {
+            out.push(`${d}/ (nicht lesbar)`);
+            return;
+          }
+          for (const name of names) {
+            const p = (0, import_node_path2.join)(d, name);
+            const s = await (0, import_promises4.stat)(p).catch(() => null);
+            if (!s) {
+              continue;
+            }
+            if (s.isDirectory()) {
+              if (depth < 3) {
+                await walk(p, depth + 1);
+              }
+            } else if (s.isFile()) {
+              const readable = await (0, import_promises4.access)(p, import_node_fs3.constants.R_OK).then(
+                () => true,
+                () => false
+              );
+              out.push(`${p}  ${s.size} B  ${new Date(s.mtimeMs).toISOString().slice(0, 16)}${readable ? "" : "  (nicht lesbar)"}`);
+            }
+            if (out.length >= 500) {
+              return;
+            }
+          }
+        };
+        await walk(dir, 0);
+        return out.join("\n") || "keine Dateien";
+      }
+    },
+    {
+      def: {
+        name: "read_log_file",
+        title: "Read a log file",
+        description: `The end of a log file below ${LOG_ROOT} (also .gz), optionally only lines matching grep (regular expression).`,
+        inputSchema: {
+          type: "object",
+          properties: { path: { type: "string" }, lines: { type: "number" }, grep: { type: "string" } },
+          required: ["path"]
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const path = await logPath(str(a, "path") ?? "");
+        const s = await (0, import_promises4.stat)(path);
+        if (!s.isFile()) {
+          throw new ToolError(`${path} ist keine Datei`);
+        }
+        if (s.size > MAX_FILE) {
+          throw new ToolError(`${path} ist zu gro\xDF (${bytes(s.size)})`);
+        }
+        let buf;
+        try {
+          buf = await (0, import_promises4.readFile)(path);
+        } catch (e) {
+          throw new ToolError(e.code === "EACCES" ? `${path}: kein Lesezugriff f\xFCr bee-linux` : e.message);
+        }
+        if (path.endsWith(".gz")) {
+          buf = (0, import_node_zlib.gunzipSync)(buf, { maxOutputLength: MAX_FILE });
+        }
+        return tail(buf.toString("utf8"), lines(a), pattern(a)) || "(leer)";
+      }
+    },
+    {
+      def: {
+        name: "list_processes",
+        title: "Processes",
+        description: "The processes using the most CPU or memory: pid, user, CPU %, memory %, resident size, running time, name (no command lines).",
+        inputSchema: {
+          type: "object",
+          properties: { sort: { type: "string", enum: ["cpu", "mem"] }, limit: { type: "number", description: "default 25" } }
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const by = str(a, "sort") === "mem" ? "-pmem" : "-pcpu";
+        const limit = Math.max(1, Math.min(200, Math.round(Number(a.limit ?? 25)) || 25));
+        const text = await program("ps", ["-eo", "pid,user:16,pcpu,pmem,rss,etime,comm", `--sort=${by}`]);
+        return text.split("\n").slice(0, limit + 1).join("\n");
+      }
+    },
+    {
+      def: {
+        name: "listening_ports",
+        title: "Listening ports",
+        description: "TCP and UDP ports the server listens on, with their address (without the processes: those need root).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: () => program("ss", ["-tuln"])
+    },
+    {
+      def: {
+        name: "network",
+        title: "Network",
+        description: "Addresses of the interfaces, routes and name servers of the server.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: async () => {
+        const [addr, route, resolv] = await Promise.all([
+          program("ip", ["-br", "addr"]).catch((e) => String(e.message)),
+          program("ip", ["route"]).catch((e) => String(e.message)),
+          (0, import_promises4.readFile)("/etc/resolv.conf", "utf8").catch(() => "")
+        ]);
+        const ns = resolv.split("\n").filter((l) => /^\s*(nameserver|search)\b/.test(l));
+        return `Interfaces:
+${addr}
+
+Routen:
+${route}
+
+DNS:
+${ns.join("\n") || "\u2013"}`;
+      }
+    },
+    {
+      def: {
+        name: "test_connection",
+        title: "Test a connection",
+        description: "Tests from the server once, as the checks do: tcp (host:port answers), http (an http(s) address: status, optionally a text in the body), cert (TLS certificate of host:port: valid, until when).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: ["tcp", "http", "cert"] },
+            target: { type: "string", description: "host:port, or the address for http" },
+            text: { type: "string", description: "http: text the body must contain" }
+          },
+          required: ["kind", "target"]
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      run: async (a) => {
+        const kind = str(a, "kind");
+        const target = str(a, "target") ?? "";
+        if (!["tcp", "http", "cert"].includes(kind)) {
+          throw new ToolError("kind: tcp, http oder cert");
+        }
+        if (kind !== "http" && !hostPort(target)) {
+          throw new ToolError("target als host:port");
+        }
+        const r = await runCheck({ id: "test", name: "test", kind, target, ...str(a, "text") ? { text: str(a, "text") } : {} });
+        return `${r.state}: ${r.text}`;
+      }
+    },
+    {
+      def: {
+        name: "package_updates",
+        title: "Package updates",
+        description: "Packages of apt that can be upgraded (security updates marked), and whether the server waits for a reboot.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: async () => {
+        const r = await run("apt", ["list", "--upgradeable"], { timeout: 6e4 });
+        if (r.code !== 0) {
+          throw new ToolError(r.error === "ENOENT" ? "kein apt auf diesem Server" : r.stderr.trim());
+        }
+        const list = parseUpgradeable(r.stdout);
+        const reboot = await (0, import_promises4.stat)("/var/run/reboot-required").then(
+          () => true,
+          () => false
+        );
+        return `${list.length ? list.map((p) => `${p.name} ${p.from ?? "?"} -> ${p.version ?? "?"}${p.security ? " [Sicherheit]" : ""}`).join("\n") : "keine Updates"}
+Neustart n\xF6tig: ${reboot ? "ja" : "nein"}`;
+      }
+    },
+    {
+      def: {
+        name: "package_info",
+        title: "Package",
+        description: "Installed and available versions of a package of apt (apt-cache policy) and its state (dpkg).",
+        inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+        annotations: ro
+      },
+      run: async (a) => {
+        const name = str(a, "name") ?? "";
+        if (!/^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/.test(name)) {
+          throw new ToolError("Ung\xFCltiger Paketname");
+        }
+        const [policy, status] = await Promise.all([
+          program("apt-cache", ["policy", name]),
+          program("dpkg-query", ["-W", "-f=${Status} ${Version}\n", name]).catch((e) => String(e.message))
+        ]);
+        return `${policy || `${name}: unbekannt`}
+
+dpkg: ${status || "nicht installiert"}`;
+      }
+    }
+  ];
+  const viaRoot = async (args, what) => {
+    if (!deps.rootLogs()) {
+      throw new ToolError(`${what} braucht root: auf dem Server LOGS=1 in /etc/bee-linux/root.conf (install.sh --logs)`);
+    }
+    const r = await deps.root.read(args);
+    if (r.code !== 0 && !r.stdout.trim()) {
+      throw new ToolError((r.stderr || r.error || `Ende mit ${r.code}`).trim().slice(-2e3));
+    }
+    return (r.stdout + (r.stderr ? `
+${r.stderr}` : "")).trim();
+  };
+  const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+  tools.push(
+    {
+      def: {
+        name: "docker_containers",
+        title: "Docker containers",
+        description: "Containers of Docker: name, image, state and status (through the helper of bee-linux, DOCKER=1).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: async () => {
+        const list = await deps.root.docker();
+        if (!list) {
+          throw new ToolError("Docker nicht erlaubt oder nicht installiert (DOCKER=1 in /etc/bee-linux/root.conf)");
+        }
+        return list.map((c) => `${c.name}  ${c.image}  ${c.state}${c.health ? ` (${c.health})` : ""}${c.exitCode !== void 0 ? ` exit ${c.exitCode}` : ""}`).join("\n") || "keine Container";
+      }
+    },
+    {
+      def: {
+        name: "docker_logs",
+        title: "Logs of a container",
+        description: "The last lines of the log of a Docker container (needs LOGS=1 and DOCKER=1 in root.conf).",
+        inputSchema: {
+          type: "object",
+          properties: { name: { type: "string" }, lines: { type: "number" }, since: { type: "string", description: 'e.g. "2h", "30m"' }, grep: { type: "string" } },
+          required: ["name"]
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const name = str(a, "name") ?? "";
+        if (!NAME.test(name)) {
+          throw new ToolError("Ung\xFCltiger Name eines Containers");
+        }
+        const since = str(a, "since");
+        if (since && !/^\d{1,5}[smhd]$/.test(since)) {
+          throw new ToolError('since wie "30m", "2h", "1d"');
+        }
+        const re = pattern(a);
+        const n = lines(a);
+        const text = await viaRoot(["docker-logs", name, String(re ? 2e4 : n), ...since ? [since] : []], "docker_logs");
+        return tail(text, n, re) || "(leer)";
+      }
+    },
+    {
+      def: {
+        name: "pm2_list",
+        title: "pm2 processes",
+        description: "Processes of pm2: name, status, restarts (PM2_USER in root.conf).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: async () => {
+        const list = await deps.root.pm2();
+        if (!list) {
+          throw new ToolError("pm2 nicht eingerichtet (PM2_USER in /etc/bee-linux/root.conf)");
+        }
+        return list.map((p) => `${p.name}  ${p.status}  restarts ${p.restarts}`).join("\n") || "keine Prozesse";
+      }
+    },
+    {
+      def: {
+        name: "pm2_logs",
+        title: "Logs of a pm2 process",
+        description: "The last lines of the output and error log of a process of pm2 (needs LOGS=1 and PM2_USER in root.conf).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            stream: { type: "string", enum: ["out", "error"], description: "default error" },
+            lines: { type: "number" },
+            grep: { type: "string" }
+          },
+          required: ["name"]
+        },
+        annotations: ro
+      },
+      run: async (a) => {
+        const name = str(a, "name") ?? "";
+        if (!NAME.test(name)) {
+          throw new ToolError("Ung\xFCltiger Name eines Prozesses");
+        }
+        const stream = str(a, "stream") === "out" ? "out" : "error";
+        const re = pattern(a);
+        const n = lines(a);
+        return tail(await viaRoot(["pm2-logs", name, stream, String(re ? 2e4 : n)], "pm2_logs"), n, re) || "(leer)";
+      }
+    },
+    {
+      def: {
+        name: "nginx_test",
+        title: "Test the configuration of nginx",
+        description: "nginx -t: whether the configuration of nginx is valid, with the errors (needs LOGS=1 in root.conf).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: () => viaRoot(["nginx-test"], "nginx_test")
+    },
+    {
+      def: {
+        name: "certbot_certificates",
+        title: "Certificates of certbot",
+        description: "certbot certificates: the certificates of Let's Encrypt on the server, their domains and expiry (needs LOGS=1 in root.conf).",
+        inputSchema: { type: "object", properties: {} },
+        annotations: ro
+      },
+      run: () => viaRoot(["certbot"], "certbot_certificates")
+    }
+  );
+  return tools;
+}
+async function callTool(tools, name, args) {
+  const tool = tools.find((t) => t.def.name === name);
+  if (!tool) {
+    return { text: `Unbekanntes Werkzeug: ${name}`, isError: true };
+  }
+  try {
+    const text = await tool.run(args ?? {});
+    return text.length > MAX_TOOL_TEXT ? { text: `[gek\xFCrzt, nur das Ende]
+${text.slice(-MAX_TOOL_TEXT)}`, isError: false, truncated: true } : { text, isError: false };
+  } catch (e) {
+    return { text: e.message, isError: true };
+  }
+}
+
 // src/transport.ts
 var import_node_events = require("node:events");
 var import_node_tls2 = __toESM(require("node:tls"), 1);
-var import_node_zlib = require("node:zlib");
+var import_node_zlib2 = require("node:zlib");
 var import_mqtt = __toESM(require_build2(), 1);
 function encodePayload(obj) {
-  return (0, import_node_zlib.gzipSync)(Buffer.from(JSON.stringify(obj)));
+  return (0, import_node_zlib2.gzipSync)(Buffer.from(JSON.stringify(obj)));
 }
 function decodePayload(buf) {
   if (buf.length > 2 && buf[0] === 31 && buf[1] === 139) {
-    buf = (0, import_node_zlib.gunzipSync)(buf);
+    buf = (0, import_node_zlib2.gunzipSync)(buf);
   }
   return JSON.parse(buf.toString("utf8"));
 }
@@ -25424,7 +26009,7 @@ var TunnelClient = class {
 };
 
 // src/agent.ts
-var AGENT_VERSION = "0.1.0";
+var AGENT_VERSION = "0.2.0";
 var MIN = 6e4;
 var JOURNAL_EVERY = 10 * MIN;
 var APT_LIST_EVERY = 30 * MIN;
@@ -25456,7 +26041,7 @@ async function enroll(url, req) {
 function buildInventory(input) {
   const { c } = input;
   const comment = normalizeComment(input.config.comment);
-  const commands = ["checks"];
+  const commands = ["checks", "mcp"];
   if (c.abilities.apt && c.osUpdates) {
     commands.push("osUpgrade");
   }
@@ -25466,23 +26051,25 @@ function buildInventory(input) {
   const root = c.linux.mounts.find((m) => m.path === "/");
   return {
     platform: "linux",
-    linux: { distro: c.distro, cpus: import_node_os2.default.cpus().length, swapTotal: c.swapTotal, ...c.linux },
+    linux: { distro: c.distro, cpus: import_node_os3.default.cpus().length, swapTotal: c.swapTotal, ...c.linux },
     agentVersion: AGENT_VERSION,
     uuid: input.uuid,
-    hostname: import_node_os2.default.hostname(),
+    hostname: import_node_os3.default.hostname(),
     ...comment ? { comment } : {},
     remoteAccess: input.console ? ["console"] : [],
     ...input.console ? { consoleUser: consoleUser() } : {},
     accessTargets: {},
     commands,
+    // reading only, as the user of bee-linux; the name is no login of a program as with ioBroker
+    ...input.ai ? { ai: { user: consoleUser(), setState: false, objectChange: false } } : {},
     ...c.osUpdates ? { osUpdates: c.osUpdates } : {},
     // no ioBroker here; node empty on purpose: the Node.js of the agent is no matter of the server
     software: { jsController: "", node: "", npm: "", adapters: {}, instances: {} },
     system: {
-      platform: import_node_os2.default.platform(),
-      arch: import_node_os2.default.arch(),
+      platform: import_node_os3.default.platform(),
+      arch: import_node_os3.default.arch(),
       os: c.distro,
-      kernel: import_node_os2.default.release(),
+      kernel: import_node_os3.default.release(),
       model: c.model,
       memTotal: c.memTotal,
       diskTotal: root?.size ?? 0
@@ -25491,14 +26078,14 @@ function buildInventory(input) {
   };
 }
 async function machineModel() {
-  const read = (f) => (0, import_promises4.readFile)(f, "utf8").then((s) => s.replace(/\0/g, "").trim()).catch(() => "");
+  const read = (f) => (0, import_promises5.readFile)(f, "utf8").then((s) => s.replace(/\0/g, "").trim()).catch(() => "");
   const board = await read("/proc/device-tree/model");
   if (board) {
     return board;
   }
   const [vendor, product] = await Promise.all([read("/sys/class/dmi/id/sys_vendor"), read("/sys/class/dmi/id/product_name")]);
   const dmi = [vendor, product].filter((s) => s && !/^(To be filled|System manufacturer|System Product Name|Default string)/i.test(s));
-  return dmi.join(" ") || import_node_os2.default.cpus()[0]?.model?.trim() || "";
+  return dmi.join(" ") || import_node_os3.default.cpus()[0]?.model?.trim() || "";
 }
 var ENROLL_MIN = 3e4;
 var ENROLL_MAX = 36e5;
@@ -25507,6 +26094,7 @@ var Agent = class {
     this.config = config2;
     this.log = log2;
     this.root = new Root(config2.rootHelper);
+    this.tools = buildTools({ root: this.root, rootLogs: () => !!this.extras?.abilities.logs });
   }
   config;
   log;
@@ -25533,16 +26121,20 @@ var Agent = class {
   collecting = null;
   /** An upgrade of packages is running */
   upgrading = false;
+  /** The tools of the AI access */
+  tools;
+  /** AI sessions seen, for the log: id -> who */
+  aiSessions = /* @__PURE__ */ new Map();
   get connected() {
     return !!this.transport?.connected;
   }
   async start() {
-    await (0, import_promises4.mkdir)(this.config.dataDir, { recursive: true });
+    await (0, import_promises5.mkdir)(this.config.dataDir, { recursive: true });
     this.uuid = await this.loadUuid();
     this.creds = await this.loadCreds();
     this.checks = await this.loadChecks();
     this.log.info(
-      `bee-linux ${AGENT_VERSION}: server ${this.config.url}, ${this.checks?.list.length ?? 0} checks every ${this.config.check} s, console ${!this.config.console ? "off" : findScript() ? "allowed" : "allowed, but no script (util-linux) here"}`
+      `bee-linux ${AGENT_VERSION}: server ${this.config.url}, ${this.checks?.list.length ?? 0} checks every ${this.config.check} s, console ${!this.config.console ? "off" : findScript() ? "allowed" : "allowed, but no script (util-linux) here"}, AI access ${this.config.ai ? "allowed (reading)" : "off"}`
     );
     if (this.creds) {
       this.connect();
@@ -25563,35 +26155,35 @@ var Agent = class {
     await this.transport?.stop();
   }
   async loadUuid() {
-    const file2 = (0, import_node_path2.join)(this.config.dataDir, "uuid");
-    const known = (await (0, import_promises4.readFile)(file2, "utf8").catch(() => "")).trim();
+    const file2 = (0, import_node_path3.join)(this.config.dataDir, "uuid");
+    const known = (await (0, import_promises5.readFile)(file2, "utf8").catch(() => "")).trim();
     if (known) {
       return known;
     }
     const uuid = (0, import_node_crypto.randomUUID)();
-    await (0, import_promises4.writeFile)(file2, `${uuid}
+    await (0, import_promises5.writeFile)(file2, `${uuid}
 `, { mode: 384 });
     return uuid;
   }
   async loadCreds() {
     try {
-      return JSON.parse(await (0, import_promises4.readFile)((0, import_node_path2.join)(this.config.dataDir, "device.json"), "utf8"));
+      return JSON.parse(await (0, import_promises5.readFile)((0, import_node_path3.join)(this.config.dataDir, "device.json"), "utf8"));
     } catch {
       return null;
     }
   }
   async loadChecks() {
     try {
-      const c = JSON.parse(await (0, import_promises4.readFile)((0, import_node_path2.join)(this.config.dataDir, "checks.json"), "utf8"));
+      const c = JSON.parse(await (0, import_promises5.readFile)((0, import_node_path3.join)(this.config.dataDir, "checks.json"), "utf8"));
       return typeof c?.hash === "string" && Array.isArray(c.list) ? c : null;
     } catch {
       return null;
     }
   }
   async saveChecks(c) {
-    const file2 = (0, import_node_path2.join)(this.config.dataDir, "checks.json");
-    await (0, import_promises4.writeFile)(`${file2}.tmp`, JSON.stringify(c), { mode: 384 });
-    await (0, import_promises4.rename)(`${file2}.tmp`, file2);
+    const file2 = (0, import_node_path3.join)(this.config.dataDir, "checks.json");
+    await (0, import_promises5.writeFile)(`${file2}.tmp`, JSON.stringify(c), { mode: 384 });
+    await (0, import_promises5.rename)(`${file2}.tmp`, file2);
   }
   async tryEnroll(delay) {
     if (this.stopped) {
@@ -25605,13 +26197,13 @@ var Agent = class {
     const result = await enroll(this.config.url, {
       token: this.config.token,
       uuid: this.uuid,
-      hostname: import_node_os2.default.hostname(),
+      hostname: import_node_os3.default.hostname(),
       agentVersion: AGENT_VERSION,
       ...normalizeComment(this.config.comment) ? { comment: normalizeComment(this.config.comment) } : {}
     });
     if (result.kind === "ok") {
       this.creds = result.creds;
-      await (0, import_promises4.writeFile)((0, import_node_path2.join)(this.config.dataDir, "device.json"), JSON.stringify(result.creds), { mode: 384 });
+      await (0, import_promises5.writeFile)((0, import_node_path3.join)(this.config.dataDir, "device.json"), JSON.stringify(result.creds), { mode: 384 });
       this.log.info(`Enrolled as device ${result.creds.deviceId} (asset ${result.creds.assetId})`);
       this.connect();
       return;
@@ -25632,7 +26224,7 @@ var Agent = class {
     transport.on("disconnected", () => this.log.info("Disconnected from the broker"));
     transport.on("rejected", (reason) => {
       this.log.error(
-        `The broker rejects this device (${reason}): it was revoked in the portal. To enroll again, delete ${(0, import_node_path2.join)(this.config.dataDir, "device.json")} and set a new BEE_TOKEN.`
+        `The broker rejects this device (${reason}): it was revoked in the portal. To enroll again, delete ${(0, import_node_path3.join)(this.config.dataDir, "device.json")} and set a new BEE_TOKEN.`
       );
     });
     transport.on("job", (job) => void this.onJob(job));
@@ -25647,7 +26239,7 @@ var Agent = class {
   async sendState() {
     const [mem, root, temp] = await Promise.all([
       memInfo(),
-      (0, import_promises4.statfs)("/").catch(() => null),
+      (0, import_promises5.statfs)("/").catch(() => null),
       temperature()
     ]);
     const st = {
@@ -25655,8 +26247,8 @@ var Agent = class {
       ts: Date.now(),
       online: true,
       agentVersion: AGENT_VERSION,
-      uptime: Math.round(import_node_os2.default.uptime()),
-      load: Math.round(import_node_os2.default.loadavg()[0] * 100) / 100,
+      uptime: Math.round(import_node_os3.default.uptime()),
+      load: Math.round(import_node_os3.default.loadavg()[0] * 100) / 100,
       memFree: mem.available,
       ...root ? { diskFree: root.bavail * root.bsize } : {},
       ...temp !== void 0 ? { temperature: temp } : {}
@@ -25706,6 +26298,7 @@ var Agent = class {
           uuid: this.uuid,
           config: this.config,
           console: this.consoleReady(),
+          ai: this.config.ai,
           c: {
             distro: this.static.distro,
             model: this.static.model,
@@ -25786,10 +26379,56 @@ var Agent = class {
           await this.reboot(job);
         }
         return;
+      case "mcp":
+        if (job.ref && job.mcp) {
+          await this.mcp(job.ref, job.mcp);
+        }
+        return;
     }
     if (job.ref) {
       await this.reply(job.ref, "error", `bee-linux kennt den Befehl ${job.cmd} nicht`);
     }
+  }
+  /** A request of an AI session: only with the consent of the owner, and only until the session ends */
+  async mcp(ref, m) {
+    if (!this.config.ai) {
+      await this.reply(ref, "error", "Der KI-Zugang ist auf dem Server nicht erlaubt (BEE_AI=true in /etc/bee-linux/bee-linux.env)");
+      return;
+    }
+    if (typeof m.expiresAt !== "number" || m.expiresAt < Date.now()) {
+      await this.reply(ref, "error", "Die KI-Sitzung ist abgelaufen");
+      return;
+    }
+    const tools = this.tools.map((t) => t.def);
+    switch (m.action) {
+      case "open":
+        this.aiSessions.set(m.session, m.by);
+        this.log.info(`AI session ${m.session} of ${m.by} until ${new Date(m.expiresAt).toISOString()}: ${m.purpose}`);
+        await this.publishMcp(ref, { tools });
+        return;
+      case "tools":
+        await this.publishMcp(ref, { tools });
+        return;
+      case "close":
+        this.aiSessions.delete(m.session);
+        this.log.info(`AI session ${m.session} ended`);
+        await this.publishMcp(ref, {});
+        return;
+      case "call": {
+        if (typeof m.tool !== "string") {
+          await this.reply(ref, "error", "Werkzeug fehlt");
+          return;
+        }
+        this.log.info(`AI session ${m.session} (${m.by}): ${m.tool}`);
+        const result = await callTool(this.tools, m.tool, m.args ?? {});
+        await this.publishMcp(ref, { result });
+        return;
+      }
+    }
+    await this.reply(ref, "error", `Unbekannte Aktion ${String(m.action)}`);
+  }
+  publishMcp(ref, mcp) {
+    return this.transport?.publish("reply", { v: PROTOCOL_VERSION, ts: Date.now(), ref, state: "done", mcp }) ?? Promise.resolve(false);
   }
   async setChecks(c) {
     if (typeof c.hash !== "string" || !Array.isArray(c.list)) {
@@ -25838,21 +26477,21 @@ var Agent = class {
     }
     this.apt = null;
     await this.collect(false);
-    const tail = output.trim().slice(-MAX_REPLY_TEXT);
+    const tail2 = output.trim().slice(-MAX_REPLY_TEXT);
     if (code !== 0) {
       this.log.warn(`Upgrade failed (${code ?? "not started"})`);
       await this.reply(ref, "error", `apt-get endete mit ${code ?? "Fehler"}
-${tail}`);
+${tail2}`);
       return;
     }
     if (req?.reboot) {
       const error = await this.root.reboot();
       await this.reply(ref, error ? "error" : "done", error ? `Aktualisiert, Neustart fehlgeschlagen: ${error}
-${tail}` : `Aktualisiert, Server startet neu
-${tail}`);
+${tail2}` : `Aktualisiert, Server startet neu
+${tail2}`);
       return;
     }
-    await this.reply(ref, "done", tail);
+    await this.reply(ref, "done", tail2);
   }
   async reboot(job) {
     const ref = job.ref;
@@ -25914,7 +26553,7 @@ ${tail}`);
     }
     this.shells.set(req.id, running + 1);
     startShell(stream, {
-      cwd: import_node_os2.default.homedir(),
+      cwd: import_node_os3.default.homedir(),
       log: this.log,
       by: req.by,
       onEnd: () => {
@@ -25954,6 +26593,7 @@ function loadConfig(env = process.env) {
     dataDir: env.BEE_DATA_DIR || "/var/lib/bee-linux",
     comment: (env.BEE_COMMENT || "").trim(),
     console: flag(env.BEE_CONSOLE, false),
+    ai: flag(env.BEE_AI, false),
     heartbeat: seconds2(env.BEE_HEARTBEAT, 300, 60),
     check: seconds2(env.BEE_CHECK, 60, 15),
     aptUpdate: hours(env.BEE_APT_UPDATE, 6),

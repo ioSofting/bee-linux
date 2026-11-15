@@ -19,16 +19,18 @@ export interface RootAbilities {
     pm2: boolean;
     /** the containers of Docker */
     docker: boolean;
+    /** reading for the AI access: logs of Docker and pm2, nginx -t, certbot certificates */
+    logs: boolean;
 }
 
-const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false };
+const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false, logs: false };
 
 /** A package name as Debian allows it; nothing that could be taken for an option */
 export const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
 
 export function parseAbilities(text: string): RootAbilities {
     const on = (key: string): boolean => new RegExp(`^${key}=1$`, 'm').test(text);
-    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker') };
+    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker'), logs: on('logs') };
 }
 
 /** Lines "name\timage\tstate\tstatus" of `docker ps -a --format` */
@@ -69,6 +71,11 @@ export class Root {
 
     private call(args: string[], timeout = 60_000): ReturnType<typeof run> {
         return run('sudo', ['-n', this.helper, ...args], { timeout });
+    }
+
+    /** A reading action of the helper for a tool of the AI (docker-logs, pm2-logs, nginx-test, certbot) */
+    read(args: string[]): ReturnType<typeof run> {
+        return run('sudo', ['-n', this.helper, ...args], { timeout: 90_000, maxBuffer: 32 * 1024 * 1024 });
     }
 
     async abilities(): Promise<RootAbilities> {

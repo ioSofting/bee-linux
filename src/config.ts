@@ -16,6 +16,11 @@ export interface Config {
      * console (BEE_CONSOLE, default off)
      */
     console: boolean;
+    /**
+     * The owner allows the AI access: an AI of the integrator reads the server through the tools of bee-linux (tools.ts),
+     * only while a person opened an AI session in the portal (BEE_AI, default off). Nothing of it writes.
+     */
+    ai: boolean;
     /** Heartbeat with load, memory and free space, seconds (BEE_HEARTBEAT, default 5 min) */
     heartbeat: number;
     /** How often the checks run, seconds (BEE_CHECK, default 60) */
@@ -54,6 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         dataDir: env.BEE_DATA_DIR || '/var/lib/bee-linux',
         comment: (env.BEE_COMMENT || '').trim(),
         console: flag(env.BEE_CONSOLE, false),
+        ai: flag(env.BEE_AI, false),
         heartbeat: seconds(env.BEE_HEARTBEAT, 300, 60),
         check: seconds(env.BEE_CHECK, 60, 15),
         aptUpdate: hours(env.BEE_APT_UPDATE, 6),

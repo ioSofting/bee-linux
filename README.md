@@ -32,6 +32,8 @@ Options of `install.sh` (also later, to change a setting; without options it upd
 | `--url URL` | the beekeeper server (default `https://beekeeper.one`) |
 | `--comment TEXT` | shown in the portal |
 | `--console` / `--no-console` | allow the console in the portal (default off) |
+| `--ai` / `--no-ai` | allow the AI access, read only (default off; see below) |
+| `--logs` / `--no-logs` | let the AI also read logs of Docker and pm2, `nginx -t` and `certbot certificates` (default off) |
 | `--apt` / `--no-apt` | allow updates of packages from the portal (default on) |
 | `--reboot` / `--no-reboot` | allow a restart from the portal (default on) |
 | `--docker` / `--no-docker` | report the containers of Docker (default on if Docker is installed) |
@@ -46,8 +48,8 @@ Update: `git pull && sudo ./install.sh`.
 | --- | --- |
 | user `bee` | system user without login; groups `systemd-journal` and `adm` to read the journal and the logs |
 | `/opt/bee-linux` | `bee-linux.cjs` (the agent, one file) and `bee-root` (the helper for root), owned by root |
-| `/etc/bee-linux/bee-linux.env` | settings of the agent (`BEE_URL`, `BEE_TOKEN`, `BEE_COMMENT`, `BEE_CONSOLE`, `BEE_CHECK`, `BEE_HEARTBEAT`, `BEE_APT_UPDATE`) |
-| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`) |
+| `/etc/bee-linux/bee-linux.env` | settings of the agent (`BEE_URL`, `BEE_TOKEN`, `BEE_COMMENT`, `BEE_CONSOLE`, `BEE_AI`, `BEE_CHECK`, `BEE_HEARTBEAT`, `BEE_APT_UPDATE`) |
+| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`, `LOGS`) |
 | `/var/lib/bee-linux` | device certificate, UUID and the checks from the portal; keep it, or the server enrolls anew |
 | `/etc/sudoers.d/bee-linux` | `bee` may run `/opt/bee-linux/bee-root` without a password, nothing else |
 | `bee-linux.service` | the service (systemd), as user `bee` |
@@ -65,6 +67,7 @@ Update: `git pull && sudo ./install.sh`.
   one from the access data of the asset without showing it. Every console is in the audit log of the portal.
 - The server decides nothing about targets on the device: the checks are validated on both sides (unit names,
   host:port, http(s) addresses, absolute paths), and the console address must belong to the own server.
+- The AI access has no shell and nothing that writes: only the fixed tools below, each with checked arguments.
 
 ## Checks
 
@@ -83,6 +86,25 @@ of the asset with the severity set for the check.
 Without any check the agent still reports failed units, full filesystems (space and inodes), pending updates (with
 security updates separately), a pending reboot, the clock (NTP), pm2 processes that do not run and Docker containers
 that restart, are unhealthy or ended with an error.
+
+## AI access
+
+With `BEE_AI=true` (`--ai`) an AI of the integrator can investigate the server through the MCP server of beekeeper
+(`device_list_tools`, `device_call_tool`), but only while a person opened an AI session for the asset in the portal
+(button "KI-Zugang", with a purpose and an end). Every call is in the audit log of the asset. The tools run as the
+user `bee`, read only, and never get a shell:
+
+| Tool | What it reads |
+| --- | --- |
+| `overview` | system, load, memory, filesystems, failed units, clock |
+| `list_services`, `list_timers`, `service_status` | units of systemd, their state and the last lines of their journal |
+| `read_journal` | the journal, filtered by unit, priority, time and a pattern |
+| `list_log_files`, `read_log_file` | files below `/var/log` that `bee` may read (groups `adm`, `systemd-journal`) |
+| `list_processes` | processes with CPU and memory (program names, no command lines: they may hold passwords) |
+| `listening_ports`, `network`, `test_connection` | open ports, addresses and routes, a test of tcp, http(s) or a certificate |
+| `package_updates`, `package_info` | pending updates, one package |
+| `docker_containers`, `pm2_list` | containers and pm2 processes (as reported) |
+| `docker_logs`, `pm2_logs`, `nginx_test`, `certbot_certificates` | through the helper; only with `LOGS=1` in `root.conf` (`--logs`) |
 
 ## Development
 

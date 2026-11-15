@@ -14,6 +14,7 @@ import {
     type Inventory,
     type JobMessage,
     type LinuxInfo,
+    type McpRequest,
     type OsUpdates,
     type ReplyMessage,
     type StateMessage,
@@ -27,6 +28,7 @@ import { consoleUser, findScript, MAX_SHELLS, startShell } from './console.js';
 import { journalSummary, type JournalSummary } from './journal.js';
 import { PACKAGE_NAME, Root, type RootAbilities } from './root.js';
 import { failedUnits, memInfo, mounts, ntpSynced, osRelease, temperature } from './system.js';
+import { buildTools, callTool } from './tools.js';
 import { Transport, trustedCas } from './transport.js';
 import { TunnelClient, trustedTunnelUrl } from './tunnel-client.js';
 
@@ -37,7 +39,7 @@ import { TunnelClient, trustedTunnelUrl } from './tunnel-client.js';
  * (bee); what needs root goes through the helper bee-root (root.ts).
  */
 
-export const AGENT_VERSION = '0.1.0';
+export const AGENT_VERSION = '0.2.0';
 
 const MIN = 60_000;
 /** The journal of 24 hours is read this often */
@@ -92,11 +94,13 @@ export function buildInventory(input: {
     config: Pick<Config, 'comment'>;
     /** The console is allowed and can run here */
     console: boolean;
+    /** The owner allows the AI access (BEE_AI) */
+    ai?: boolean;
     c: Collected;
 }): Inventory {
     const { c } = input;
     const comment = normalizeComment(input.config.comment);
-    const commands: AgentCommand[] = ['checks'];
+    const commands: AgentCommand[] = ['checks', 'mcp'];
     if (c.abilities.apt && c.osUpdates) {
         commands.push('osUpgrade');
     }
@@ -115,6 +119,8 @@ export function buildInventory(input: {
         ...(input.console ? { consoleUser: consoleUser() } : {}),
         accessTargets: {},
         commands,
+        // reading only, as the user of bee-linux; the name is no login of a program as with ioBroker
+        ...(input.ai ? { ai: { user: consoleUser(), setState: false, objectChange: false } } : {}),
         ...(c.osUpdates ? { osUpdates: c.osUpdates } : {}),
         // no ioBroker here; node empty on purpose: the Node.js of the agent is no matter of the server
         software: { jsController: '', node: '', npm: '', adapters: {}, instances: {} },
@@ -178,12 +184,17 @@ export class Agent {
     private collecting: Promise<void> | null = null;
     /** An upgrade of packages is running */
     private upgrading = false;
+    /** The tools of the AI access */
+    private readonly tools;
+    /** AI sessions seen, for the log: id -> who */
+    private readonly aiSessions = new Map<string, string>();
 
     constructor(
         private readonly config: Config,
         private readonly log: Log,
     ) {
         this.root = new Root(config.rootHelper);
+        this.tools = buildTools({ root: this.root, rootLogs: () => !!this.extras?.abilities.logs });
     }
 
     get connected(): boolean {
@@ -197,7 +208,7 @@ export class Agent {
         this.checks = await this.loadChecks();
         this.log.info(
             `bee-linux ${AGENT_VERSION}: server ${this.config.url}, ${this.checks?.list.length ?? 0} checks every ${this.config.check} s, ` +
-                `console ${!this.config.console ? 'off' : findScript() ? 'allowed' : 'allowed, but no script (util-linux) here'}`,
+                `console ${!this.config.console ? 'off' : findScript() ? 'allowed' : 'allowed, but no script (util-linux) here'}, AI access ${this.config.ai ? 'allowed (reading)' : 'off'}`,
         );
         if (this.creds) {
             this.connect();
@@ -372,6 +383,7 @@ export class Agent {
                     uuid: this.uuid,
                     config: this.config,
                     console: this.consoleReady(),
+                    ai: this.config.ai,
                     c: {
                         distro: this.static.distro,
                         model: this.static.model,
@@ -454,10 +466,61 @@ export class Agent {
                     await this.reboot(job);
                 }
                 return;
+            case 'mcp':
+                if (job.ref && job.mcp) {
+                    await this.mcp(job.ref, job.mcp);
+                }
+                return;
         }
         if (job.ref) {
             await this.reply(job.ref, 'error', `bee-linux kennt den Befehl ${job.cmd} nicht`);
         }
+    }
+
+    /** A request of an AI session: only with the consent of the owner, and only until the session ends */
+    private async mcp(ref: string, m: McpRequest): Promise<void> {
+        if (!this.config.ai) {
+            await this.reply(ref, 'error', 'Der KI-Zugang ist auf dem Server nicht erlaubt (BEE_AI=true in /etc/bee-linux/bee-linux.env)');
+            return;
+        }
+        if (typeof m.expiresAt !== 'number' || m.expiresAt < Date.now()) {
+            await this.reply(ref, 'error', 'Die KI-Sitzung ist abgelaufen');
+            return;
+        }
+        const tools = this.tools.map(t => t.def);
+        switch (m.action) {
+            case 'open':
+                this.aiSessions.set(m.session, m.by);
+                this.log.info(`AI session ${m.session} of ${m.by} until ${new Date(m.expiresAt).toISOString()}: ${m.purpose}`);
+                await this.publishMcp(ref, { tools });
+                return;
+            case 'tools':
+                await this.publishMcp(ref, { tools });
+                return;
+            case 'close':
+                this.aiSessions.delete(m.session);
+                this.log.info(`AI session ${m.session} ended`);
+                await this.publishMcp(ref, {});
+                return;
+            case 'call': {
+                if (typeof m.tool !== 'string') {
+                    await this.reply(ref, 'error', 'Werkzeug fehlt');
+                    return;
+                }
+                this.log.info(`AI session ${m.session} (${m.by}): ${m.tool}`);
+                const result = await callTool(this.tools, m.tool, (m.args ?? {}) as Record<string, unknown>);
+                await this.publishMcp(ref, { result });
+                return;
+            }
+        }
+        await this.reply(ref, 'error', `Unbekannte Aktion ${String(m.action)}`);
+    }
+
+    private publishMcp(ref: string, mcp: NonNullable<ReplyMessage['mcp']>): Promise<boolean> {
+        return (
+            this.transport?.publish('reply', { v: PROTOCOL_VERSION, ts: Date.now(), ref, state: 'done', mcp } satisfies ReplyMessage) ??
+            Promise.resolve(false)
+        );
     }
 
     private async setChecks(c: { hash: string; list: CheckSpec[] }): Promise<void> {

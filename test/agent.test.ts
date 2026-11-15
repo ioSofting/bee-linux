@@ -11,6 +11,8 @@ import { hostPort, invalidCheck, runChecks } from '../src/checks.js';
 import { countErrors, countSshFailed } from '../src/journal.js';
 import { PACKAGE_NAME, parseAbilities, parseDocker, parsePm2 } from '../src/root.js';
 import { parseDf, parseFailedUnits, parseMemInfo, parseOsRelease } from '../src/system.js';
+import { buildTools, callTool, JOURNAL_TIME, logPath } from '../src/tools.js';
+import { Root } from '../src/root.js';
 import type { CheckSpec } from '../src/lib/protocol.js';
 
 test('os-release', () => {
@@ -113,7 +115,7 @@ test('package names: nothing that looks like an option', () => {
 });
 
 test('helper: abilities, docker and pm2', () => {
-    assert.deepEqual(parseAbilities('apt=1\nreboot=0\npm2=1\ndocker=0\n'), { apt: true, reboot: false, pm2: true, docker: false });
+    assert.deepEqual(parseAbilities('apt=1\nreboot=0\npm2=1\ndocker=0\nlogs=1\n'), { apt: true, reboot: false, pm2: true, docker: false, logs: true });
     assert.deepEqual(
         parseDocker(
             'web\tnginx:1.27\trunning\tUp 3 hours (healthy)\nold\tbusybox\texited\tExited (137) 2 days ago\ndb\tpostgres:16\trunning\tUp 5 seconds (health: starting)\n',
@@ -199,7 +201,7 @@ test('inventory: platform linux, commands by what sudo allows', () => {
         model: 'QEMU Standard PC',
         memTotal: 4e9,
         swapTotal: 1e9,
-        abilities: { apt: true, reboot: false, pm2: false, docker: false },
+        abilities: { apt: true, reboot: false, pm2: false, docker: false, logs: false },
         osUpdates: { packages: [], checkedAt: 1, rebootRequired: false },
         linux: {
             mounts: [{ path: '/', device: '/dev/sda1', fstype: 'ext4', size: 8e10, usedPct: 50, inodesPct: 8 }],
@@ -216,12 +218,44 @@ test('inventory: platform linux, commands by what sudo allows', () => {
     const inv = buildInventory({ uuid: 'u', config: { comment: ' Web\nserver ' }, console: false, c });
     assert.equal(inv.platform, 'linux');
     assert.equal(inv.comment, 'Web server');
-    assert.deepEqual(inv.commands, ['checks', 'osUpgrade']);
+    assert.deepEqual(inv.commands, ['checks', 'mcp', 'osUpgrade']);
+    assert.equal(inv.ai, undefined, 'no AI access without BEE_AI');
     assert.deepEqual(inv.remoteAccess, []);
     assert.equal(inv.system.diskTotal, 8e10);
     assert.equal(inv.system.os, 'Debian GNU/Linux 12 (bookworm)');
     assert.equal(inv.linux?.distro, 'Debian GNU/Linux 12 (bookworm)');
-    const withConsole = buildInventory({ uuid: 'u', config: { comment: '' }, console: true, c: { ...c, abilities: { ...c.abilities, reboot: true } } });
+    const withConsole = buildInventory({ uuid: 'u', config: { comment: '' }, console: true, ai: true, c: { ...c, abilities: { ...c.abilities, reboot: true } } });
     assert.deepEqual(withConsole.remoteAccess, ['console']);
-    assert.deepEqual(withConsole.commands, ['checks', 'osUpgrade', 'reboot']);
+    assert.deepEqual(withConsole.commands, ['checks', 'mcp', 'osUpgrade', 'reboot']);
+    assert.equal(withConsole.ai?.setState, false);
+    assert.equal(withConsole.ai?.objectChange, false);
+});
+
+test('AI tools: only read, arguments checked', async () => {
+    const tools = buildTools({ root: new Root('/nonexistent/bee-root'), rootLogs: () => false });
+    assert.ok(tools.length >= 15);
+    assert.ok(tools.every(t => t.def.annotations?.readOnlyHint === true), 'every tool only reads');
+    assert.ok(!tools.some(t => /shell|exec|command|write|restart/i.test(t.def.name)), 'no shell, no writing');
+    for (const ok of ['-2h', '-30min', 'today', 'yesterday', '2026-11-15 08:00', '2026-11-15']) {
+        assert.ok(JOURNAL_TIME.test(ok), ok);
+    }
+    for (const bad of ['--output=json', '-2h; rm', '', 'now --all']) {
+        assert.ok(!JOURNAL_TIME.test(bad), bad);
+    }
+    await assert.rejects(logPath('/etc/shadow'), /Nur Dateien unter \/var\/log|gibt es nicht/);
+    await assert.rejects(logPath('relative.log'), /absolut/);
+    assert.deepEqual(await callTool(tools, 'nope', {}), { text: 'Unbekanntes Werkzeug: nope', isError: true });
+    const badUnit = await callTool(tools, 'service_status', { unit: '--user' });
+    assert.equal(badUnit.isError, true);
+    assert.match(badUnit.text, /Ungültiger Name/);
+    const badPrio = await callTool(tools, 'read_journal', { priority: 'all' });
+    assert.equal(badPrio.isError, true);
+    const badGrep = await callTool(tools, 'read_journal', { grep: '(' });
+    assert.match(badGrep.text, /regulärer Ausdruck/);
+    const noRoot = await callTool(tools, 'nginx_test', {});
+    assert.match(noRoot.text, /LOGS=1/);
+    const badContainer = await callTool(tools, 'docker_logs', { name: '--all' });
+    assert.match(badContainer.text, /Ungültiger Name/);
+    const badConn = await callTool(tools, 'test_connection', { kind: 'tcp', target: 'nohost' });
+    assert.match(badConn.text, /host:port/);
 });

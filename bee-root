@@ -9,6 +9,11 @@
 #   bee-root reboot                  restart the server in 5 seconds
 #   bee-root pm2                     name, status and restarts of the processes of pm2 of PM2_USER
 #   bee-root docker                  name, image, state and status of the containers
+#   bee-root docker-logs NAME N [SINCE]   the last N lines of the log of a container (LOGS=1 and DOCKER=1)
+#   bee-root pm2-logs NAME out|error N    the last N lines of a log of a process of pm2 (LOGS=1 and PM2_USER)
+#   bee-root nginx-test              nginx -t (LOGS=1)
+#   bee-root certbot                 certbot certificates (LOGS=1)
+# The LOGS actions are for the tools of the AI access: they only read.
 set -euo pipefail
 umask 022
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -19,6 +24,7 @@ LOG_DIR=/var/log/bee-linux
 APT=0
 REBOOT=0
 DOCKER=0
+LOGS=0
 PM2_USER=
 
 die() {
@@ -33,9 +39,10 @@ if [ -f "$CONF" ] && [ "$(stat -c %u "$CONF")" = 0 ] && [ -z "$(find "$CONF" -pe
             APT) APT=$value ;;
             REBOOT) REBOOT=$value ;;
             DOCKER) DOCKER=$value ;;
+            LOGS) LOGS=$value ;;
             PM2_USER) PM2_USER=$value ;;
         esac
-    done < <(grep -E '^(APT|REBOOT|DOCKER|PM2_USER)=[A-Za-z0-9_.-]*$' "$CONF" || true)
+    done < <(grep -E '^(APT|REBOOT|DOCKER|LOGS|PM2_USER)=[A-Za-z0-9_.-]*$' "$CONF" || true)
 fi
 if [ -n "$PM2_USER" ] && ! [[ "$PM2_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
     PM2_USER=
@@ -45,6 +52,10 @@ can_apt() { [ "$APT" = 1 ] && command -v apt-get >/dev/null; }
 can_reboot() { [ "$REBOOT" = 1 ] && command -v systemctl >/dev/null; }
 can_pm2() { [ -n "$PM2_USER" ] && id "$PM2_USER" >/dev/null 2>&1 && command -v node >/dev/null; }
 can_docker() { [ "$DOCKER" = 1 ] && command -v docker >/dev/null; }
+can_logs() { [ "$LOGS" = 1 ]; }
+# a name of a container or a process of pm2, a number of lines
+check_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || die "not a name: $1"; }
+check_lines() { [[ "$1" =~ ^[0-9]{1,5}$ ]] || die "not a number of lines: $1"; }
 
 flag() { if "$@"; then echo 1; else echo 0; fi; }
 
@@ -57,6 +68,7 @@ case "$action" in
         echo "reboot=$(flag can_reboot)"
         echo "pm2=$(flag can_pm2)"
         echo "docker=$(flag can_docker)"
+        echo "logs=$(flag can_logs)"
         ;;
 
     apt-update)
@@ -113,6 +125,55 @@ case "$action" in
     docker)
         can_docker || die "docker not allowed (DOCKER=1 in $CONF)"
         exec timeout 20 docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}'
+        ;;
+
+    docker-logs)
+        can_logs || die "logs not allowed (LOGS=1 in $CONF)"
+        can_docker || die "docker not allowed (DOCKER=1 in $CONF)"
+        [ $# -ge 2 ] && [ $# -le 3 ] || die "docker-logs NAME LINES [SINCE]"
+        check_name "$1"
+        check_lines "$2"
+        since=()
+        if [ $# -eq 3 ]; then
+            [[ "$3" =~ ^[0-9]{1,5}[smhd]$ ]] || die "not a time: $3"
+            since=(--since "$3")
+        fi
+        exec timeout 60 docker logs --tail "$2" "${since[@]}" -- "$1" 2>&1
+        ;;
+
+    pm2-logs)
+        can_logs || die "logs not allowed (LOGS=1 in $CONF)"
+        can_pm2 || die "pm2 not allowed (PM2_USER in $CONF)"
+        [ $# -eq 3 ] || die "pm2-logs NAME out|error LINES"
+        check_name "$1"
+        [ "$2" = out ] || [ "$2" = error ] || die "out or error"
+        check_lines "$3"
+        # the file as pm2 itself knows it; nothing else of jlist leaves here
+        file=$(timeout 20 runuser -l "$PM2_USER" -c 'pm2 jlist' 2>/dev/null | NAME="$1" STREAM="$2" timeout 20 node -e '
+            let s = "";
+            process.stdin.on("data", d => (s += d));
+            process.stdin.on("end", () => {
+                const i = s.indexOf("[");
+                if (i < 0) process.exit(3);
+                const p = JSON.parse(s.slice(i)).find(x => x.name === process.env.NAME);
+                if (!p) process.exit(4);
+                const e = p.pm2_env || {};
+                console.log(process.env.STREAM === "out" ? e.pm_out_log_path : e.pm_err_log_path);
+            });') || die "no process $1 in pm2"
+        [ -f "$file" ] || die "no log file of $1"
+        exec tail -n "$3" -- "$file"
+        ;;
+
+    nginx-test)
+        can_logs || die "logs not allowed (LOGS=1 in $CONF)"
+        command -v nginx >/dev/null || die "nginx is not installed"
+        exec nginx -t 2>&1
+        ;;
+
+    certbot)
+        can_logs || die "logs not allowed (LOGS=1 in $CONF)"
+        command -v certbot >/dev/null || die "certbot is not installed"
+        exec timeout 120 certbot certificates 2>&1
         ;;
 
     *)
