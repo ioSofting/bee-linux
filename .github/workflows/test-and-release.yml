@@ -1,0 +1,78 @@
+# Tests on every push; a tag vX.Y.Z (the version of package.json) publishes the package bee-linux on npm.
+# Publishing uses trusted publishing (OIDC, configured for this workflow on npmjs.com): no npm token in the repository.
+name: Test and Release
+
+on:
+    push:
+        branches: [main]
+        tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
+    pull_request: {}
+
+concurrency:
+    group: ${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    check-and-test:
+        name: Test on Node.js ${{ matrix.node }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                node: [20, 22, 24]
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node }}
+                  cache: npm
+            - run: npm ci
+            - run: npm run check-ts
+            - run: npm run build
+            - run: npm test
+            - name: Shell scripts
+              run: bash -n install.sh && bash -n bee-root
+            - name: The command of the package runs
+              run: |
+                  node dist/cli.cjs version
+                  node dist/cli.cjs --help >/dev/null
+
+    deploy:
+        name: Publish on npm
+        needs: [check-and-test]
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write # the GitHub release
+            id-token: write # trusted publishing on npm
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  registry-url: https://registry.npmjs.org
+            # trusted publishing needs npm 11.5.1 or newer
+            - run: npm install -g npm@latest
+            - run: npm ci
+            - name: The tag is the version of the package and of the agent
+              run: |
+                  tag="${GITHUB_REF_NAME#v}"
+                  pkg=$(node -p 'require("./package.json").version')
+                  agent=$(grep -oE "AGENT_VERSION = '[^']+'" src/agent.ts | sed -E "s/.*'(.*)'/\1/")
+                  echo "tag $tag, package.json $pkg, AGENT_VERSION $agent"
+                  [ "$tag" = "$pkg" ] && [ "$pkg" = "$agent" ]
+            - name: Publish
+              run: |
+                  # a pre-release (1.2.3-beta.1) does not become "latest": the agents would offer it as an update
+                  if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+                      npm publish --access public --tag next
+                  else
+                      npm publish --access public
+                  fi
+            - name: GitHub release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $([[ "$GITHUB_REF_NAME" == *-* ]] && echo --prerelease)

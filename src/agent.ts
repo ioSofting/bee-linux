@@ -22,9 +22,10 @@ import {
 } from './lib/protocol.js';
 import { CONSOLE, consoleMessage, type TunnelStream } from './lib/tunnel.js';
 import { osUpdates } from './apt.js';
-import { invalidCheck, runChecks } from './checks.js';
+import { invalidCheck, runChecks, UNIT_NAME } from './checks.js';
 import type { Config, Log } from './config.js';
 import { consoleUser, findScript, MAX_SHELLS, startShell } from './console.js';
+import { diagnose, SUBJECT } from './diagnose.js';
 import { journalSummary, type JournalSummary } from './journal.js';
 import { PACKAGE_NAME, Root, type RootAbilities } from './root.js';
 import { failedUnits, memInfo, mounts, ntpSynced, osRelease, temperature } from './system.js';
@@ -39,7 +40,7 @@ import { TunnelClient, trustedTunnelUrl } from './tunnel-client.js';
  * (bee); what needs root goes through the helper bee-root (root.ts).
  */
 
-export const AGENT_VERSION = '0.3.0';
+export const AGENT_VERSION = '0.5.0';
 
 const MIN = 60_000;
 /** The journal of 24 hours is read this often */
@@ -50,8 +51,8 @@ const APT_LIST_EVERY = 30 * MIN;
 const EXTRAS_EVERY = 5 * MIN;
 /** Longest text of an upgrade that goes back to the portal */
 const MAX_REPLY_TEXT = 8000;
-/** Where the agent looks up the newest version (the helper installs from the same place: bee-root self-update) */
-export const LATEST_URL = 'https://raw.githubusercontent.com/ioSofting/bee-linux/main/package.json';
+/** Where the agent looks up the newest version: npm (the helper installs from the same place: bee-root self-update) */
+export const LATEST_URL = 'https://registry.npmjs.org/bee-linux/latest';
 /** How often the agent looks up the newest version */
 const LATEST_EVERY = 6 * 60 * MIN;
 
@@ -123,7 +124,7 @@ export function buildInventory(input: {
 }): Inventory {
     const { c } = input;
     const comment = normalizeComment(input.config.comment);
-    const commands: AgentCommand[] = ['checks', 'mcp'];
+    const commands: AgentCommand[] = ['checks', 'mcp', 'diagnose'];
     if (c.abilities.apt && c.osUpdates) {
         commands.push('osUpgrade');
     }
@@ -132,6 +133,9 @@ export function buildInventory(input: {
     }
     if (c.abilities.update) {
         commands.push('agentUpdate');
+    }
+    if (c.abilities.services) {
+        commands.push('unit');
     }
     const root = c.linux.mounts.find(m => m.path === '/');
     return {
@@ -210,7 +214,7 @@ export class Agent {
     private collecting: Promise<void> | null = null;
     /** An upgrade of packages is running */
     private upgrading = false;
-    /** The newest version on GitHub, when the agent may update itself */
+    /** The newest version on npm, when the agent may update itself */
     private latest: { at: number; value: string | null } | null = null;
     /** An update of the agent itself was started */
     private updating = false;
@@ -505,6 +509,16 @@ export class Agent {
                     await this.agentUpdate(job);
                 }
                 return;
+            case 'diagnose':
+                if (job.ref) {
+                    await this.diagnose(job);
+                }
+                return;
+            case 'unit':
+                if (job.ref) {
+                    await this.unit(job);
+                }
+                return;
             case 'mcp':
                 if (job.ref && job.mcp) {
                     await this.mcp(job.ref, job.mcp);
@@ -622,6 +636,40 @@ export class Agent {
             return;
         }
         await this.reply(ref, 'done', tail);
+    }
+
+    /** Details for a deviation a person clicked on in the portal: only reading, fixed per code (diagnose.ts) */
+    private async diagnose(job: JobMessage): Promise<void> {
+        const ref = job.ref!;
+        const code = job.diagnose?.code;
+        const subject = job.diagnose?.subject;
+        if (typeof code !== 'string' || !/^[a-z0-9-]{1,40}$/.test(code) || (subject !== undefined && (typeof subject !== 'string' || !SUBJECT.test(subject)))) {
+            await this.reply(ref, 'error', 'Ungültige Anfrage');
+            return;
+        }
+        this.log.info(`Details for ${code}${subject ? ` ${subject}` : ''} for ${job.by ?? '?'}`);
+        const d = await diagnose(this.tools, code, subject, this.checks?.list ?? []);
+        await this.transport?.publish('reply', { v: PROTOCOL_VERSION, ts: Date.now(), ref, state: 'done', text: d.text } satisfies ReplyMessage);
+    }
+
+    /** Restarts a failed unit, or clears its failed state (the helper allows only failed units) */
+    private async unit(job: JobMessage): Promise<void> {
+        const ref = job.ref!;
+        const name = job.unit?.name;
+        const action = job.unit?.action;
+        if (typeof name !== 'string' || !UNIT_NAME.test(name) || (action !== 'restart' && action !== 'reset-failed')) {
+            await this.reply(ref, 'error', 'Ungültige Anfrage');
+            return;
+        }
+        if (!this.extras?.abilities.services) {
+            await this.reply(ref, 'error', 'bee-linux darf keine Dienste neu starten (SERVICES=1 in /etc/bee-linux/root.conf)');
+            return;
+        }
+        this.log.info(`${action} of ${name} for ${job.by ?? '?'}`);
+        await this.reply(ref, 'running', action === 'restart' ? `${name} wird neu gestartet` : `Fehlerstatus von ${name} wird zurückgesetzt`);
+        const r = await this.root.unit(action, name);
+        await this.collect(false);
+        await this.reply(ref, r.ok ? 'done' : 'error', r.text || (r.ok ? 'erledigt' : 'fehlgeschlagen'));
     }
 
     /** Installs the newest bee-linux through the helper; install.sh restarts this agent a moment later */

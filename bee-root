@@ -13,8 +13,11 @@
 #   bee-root pm2-logs NAME out|error N    the last N lines of a log of a process of pm2 (LOGS=1 and PM2_USER)
 #   bee-root nginx-test              nginx -t (LOGS=1)
 #   bee-root certbot                 certbot certificates (LOGS=1)
-#   bee-root self-update             installs the newest bee-linux from GitHub (UPDATE=1): downloads install.sh, bee-root
-#                                    and the agent, then runs install.sh in a unit of its own (it restarts bee-linux)
+#   bee-root unit restart|reset-failed UNIT   restart a failed unit, or clear its failed state (SERVICES=1; only a
+#                                    unit that is failed right now)
+#   bee-root self-update             installs the newest bee-linux from npm (UPDATE=1): downloads the package, checks it
+#                                    against the checksum of the registry, then runs its install.sh in a unit of its own
+#                                    (that restarts bee-linux)
 # The LOGS actions are for the tools of the AI access: they only read.
 set -euo pipefail
 umask 022
@@ -28,6 +31,7 @@ REBOOT=0
 DOCKER=0
 LOGS=0
 UPDATE=0
+SERVICES=0
 PM2_USER=
 
 die() {
@@ -44,9 +48,10 @@ if [ -f "$CONF" ] && [ "$(stat -c %u "$CONF")" = 0 ] && [ -z "$(find "$CONF" -pe
             DOCKER) DOCKER=$value ;;
             LOGS) LOGS=$value ;;
             UPDATE) UPDATE=$value ;;
+            SERVICES) SERVICES=$value ;;
             PM2_USER) PM2_USER=$value ;;
         esac
-    done < <(grep -E '^(APT|REBOOT|DOCKER|LOGS|UPDATE|PM2_USER)=[A-Za-z0-9_.-]*$' "$CONF" || true)
+    done < <(grep -E '^(APT|REBOOT|DOCKER|LOGS|UPDATE|SERVICES|PM2_USER)=[A-Za-z0-9_.-]*$' "$CONF" || true)
 fi
 if [ -n "$PM2_USER" ] && ! [[ "$PM2_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
     PM2_USER=
@@ -57,9 +62,11 @@ can_reboot() { [ "$REBOOT" = 1 ] && command -v systemctl >/dev/null; }
 can_pm2() { [ -n "$PM2_USER" ] && id "$PM2_USER" >/dev/null 2>&1 && command -v node >/dev/null; }
 can_docker() { [ "$DOCKER" = 1 ] && command -v docker >/dev/null; }
 can_logs() { [ "$LOGS" = 1 ]; }
-can_update() { [ "$UPDATE" = 1 ] && command -v systemd-run >/dev/null && command -v curl >/dev/null; }
+can_services() { [ "$SERVICES" = 1 ] && command -v systemctl >/dev/null; }
+can_update() { [ "$UPDATE" = 1 ] && command -v systemd-run >/dev/null && command -v curl >/dev/null && command -v node >/dev/null && command -v tar >/dev/null; }
 # Fixed: the portal can start an update, but never say where the code comes from
-UPDATE_SOURCE=https://raw.githubusercontent.com/ioSofting/bee-linux/main
+NPM_REGISTRY=https://registry.npmjs.org
+NPM_PACKAGE=bee-linux
 # a name of a container or a process of pm2, a number of lines
 check_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || die "not a name: $1"; }
 check_lines() { [[ "$1" =~ ^[0-9]{1,5}$ ]] || die "not a number of lines: $1"; }
@@ -77,6 +84,7 @@ case "$action" in
         echo "docker=$(flag can_docker)"
         echo "logs=$(flag can_logs)"
         echo "update=$(flag can_update)"
+        echo "services=$(flag can_services)"
         ;;
 
     apt-update)
@@ -184,30 +192,66 @@ case "$action" in
         exec timeout 120 certbot certificates 2>&1
         ;;
 
+    unit)
+        can_services || die "services not allowed (SERVICES=1 in $CONF)"
+        [ $# -eq 2 ] || die "unit restart|reset-failed UNIT"
+        [ "$1" = restart ] || [ "$1" = reset-failed ] || die "restart or reset-failed"
+        unit_re='^[A-Za-z0-9][-A-Za-z0-9@:._\]{0,200}$'
+        [[ "$2" =~ $unit_re ]] || die "not a unit: $2"
+        # only what is broken: a running service is not restarted from afar
+        systemctl is-failed --quiet -- "$2" || die "$2 is not failed"
+        if [ "$1" = reset-failed ]; then
+            exec systemctl reset-failed -- "$2"
+        fi
+        # a oneshot service (certbot) runs to its end here; at most 3 minutes
+        status=0
+        timeout 180 systemctl restart -- "$2" || status=$?
+        systemctl show "$2" --no-pager -p ActiveState,SubState,Result,ExecMainStatus 2>&1 || true
+        exit "$status"
+        ;;
+
     self-update)
-        can_update || die "update not allowed (UPDATE=1 in $CONF, systemd-run and curl)"
+        can_update || die "update not allowed (UPDATE=1 in $CONF, systemd-run, curl, node and tar)"
         [ $# -eq 0 ] || die "self-update takes no arguments"
         dir=$(mktemp -d /var/tmp/bee-linux-update.XXXXXX)
-        mkdir -p "$dir/dist"
-        for f in install.sh bee-root dist/bee-linux.cjs; do
-            if ! curl -fsSL --proto '=https' --max-time 120 "$UPDATE_SOURCE/$f" -o "$dir/$f"; then
-                rm -rf "$dir"
-                die "download of $UPDATE_SOURCE/$f failed"
-            fi
-        done
-        first_line() { local l=''; IFS= read -r l <"$1" || true; printf '%s' "$l"; }
-        if [ "$(first_line "$dir/install.sh")" != '#!/bin/bash' ] || [ "$(first_line "$dir/bee-root")" != '#!/bin/bash' ]; then
+        fail() {
             rm -rf "$dir"
-            die "the download is not bee-linux"
-        fi
-        version=$(grep -oE "AGENT_VERSION = [\"'][0-9][^\"']*" "$dir/dist/bee-linux.cjs" | head -1 | sed -E 's/.*= .//' || true)
-        if [ -z "$version" ]; then
-            rm -rf "$dir"
-            die "the download is not the agent"
-        fi
+            die "$*"
+        }
+        # the newest version as the registry says, with the address and the checksum (sha512) of its package
+        curl -fsSL --proto '=https' --max-time 60 "$NPM_REGISTRY/$NPM_PACKAGE/latest" -o "$dir/latest.json" ||
+            fail "the registry does not answer"
+        meta=$(REGISTRY="$NPM_REGISTRY" PACKAGE="$NPM_PACKAGE" timeout 20 node -e '
+            const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const v = String(m.version || "");
+            const d = m.dist || {};
+            const want = `${process.env.REGISTRY}/${process.env.PACKAGE}/-/${process.env.PACKAGE}-${v}.tgz`;
+            if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v) || d.tarball !== want || !/^sha512-[A-Za-z0-9+/=]+$/.test(d.integrity || "")) process.exit(3);
+            console.log([v, d.tarball, d.integrity].join(" "));' "$dir/latest.json") || fail "unexpected answer of the registry"
+        read -r version tarball integrity <<<"$meta"
+        curl -fsSL --proto '=https' --max-time 300 "$tarball" -o "$dir/package.tgz" || fail "download of $tarball failed"
+        sum=$(timeout 20 node -e '
+            const data = require("fs").readFileSync(process.argv[1]);
+            console.log("sha512-" + require("crypto").createHash("sha512").update(data).digest("base64"));' "$dir/package.tgz") ||
+            fail "no checksum"
+        [ "$sum" = "$integrity" ] || fail "the package does not match the checksum of the registry"
+        tar -xzf "$dir/package.tgz" -C "$dir" --no-same-owner --no-same-permissions || fail "the package cannot be unpacked"
+        pkg="$dir/package"
+        first_line() {
+            local l=''
+            IFS= read -r l <"$1" || true
+            printf '%s' "$l"
+        }
+        [ -f "$pkg/install.sh" ] && [ "$(first_line "$pkg/install.sh")" = '#!/bin/bash' ] || fail "the package has no install.sh"
+        [ -f "$pkg/bee-root" ] && [ "$(first_line "$pkg/bee-root")" = '#!/bin/bash' ] || fail "the package has no bee-root"
+        agent=$(grep -oE "AGENT_VERSION = [\"'][0-9][^\"']*" "$pkg/dist/bee-linux.cjs" 2>/dev/null | head -1 | sed -E 's/.*= .//' || true)
+        [ "$agent" = "$version" ] || fail "the package $version holds the agent ${agent:-none}"
+        rm -f "$dir/package.tgz" "$dir/latest.json"
         mkdir -p -m 0750 "$LOG_DIR"
         # In a unit of its own: install.sh restarts bee-linux, and with it everything in its unit (also this helper)
-        systemd-run --quiet --collect --unit="bee-linux-update-$$"             --property=StandardOutput="file:$LOG_DIR/update.log" --property=StandardError=inherit             /bin/bash -c 'bash "$1/install.sh" --source "$1"; s=$?; rm -rf "$1"; exit $s' bee-linux-update "$dir"
+        systemd-run --quiet --collect --unit="bee-linux-update-$$" \
+            --property=StandardOutput="file:$LOG_DIR/update.log" --property=StandardError=inherit \
+            /bin/bash -c 'bash "$1/package/install.sh" --source "$1/package"; s=$?; rm -rf "$1"; exit $s' bee-linux-update "$dir"
         echo "$version"
         ;;
 

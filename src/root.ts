@@ -21,18 +21,20 @@ export interface RootAbilities {
     docker: boolean;
     /** reading for the AI access: logs of Docker and pm2, nginx -t, certbot certificates */
     logs: boolean;
-    /** update of bee-linux itself from GitHub (self-update) */
+    /** update of bee-linux itself from npm (self-update) */
     update: boolean;
+    /** restart a failed unit, or clear its failed state */
+    services: boolean;
 }
 
-const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false };
+const NONE: RootAbilities = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false, services: false };
 
 /** A package name as Debian allows it; nothing that could be taken for an option */
 export const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
 
 export function parseAbilities(text: string): RootAbilities {
     const on = (key: string): boolean => new RegExp(`^${key}=1$`, 'm').test(text);
-    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker'), logs: on('logs'), update: on('update') };
+    return { apt: on('apt'), reboot: on('reboot'), pm2: on('pm2'), docker: on('docker'), logs: on('logs'), update: on('update'), services: on('services') };
 }
 
 /** Lines "name\timage\tstate\tstatus" of `docker ps -a --format` */
@@ -135,6 +137,16 @@ export class Root {
         return r.code === 0 && /^\d+\.\d+\.\d+/.test(version)
             ? { version }
             : { error: (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500) };
+    }
+
+    /**
+     * Restarts a failed unit, or clears its failed state (the helper refuses one that is not failed)
+     *
+     * @returns the output, and whether it worked
+     */
+    async unit(action: 'restart' | 'reset-failed', name: string): Promise<{ ok: boolean; text: string }> {
+        const r = await this.call(['unit', action, name], 200_000);
+        return { ok: r.code === 0, text: (r.stdout + r.stderr || r.error || `Ende mit ${r.code}`).trim().slice(-4000) };
     }
 
     /** Restarts the server; the agent gets SIGTERM from systemd shortly after */

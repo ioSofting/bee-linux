@@ -24893,111 +24893,12 @@ function startShell(stream, opts) {
   opts.log.info(`Console: shell ${shell} as ${consoleUser()} started for ${opts.by}`);
 }
 
-// src/root.ts
-var import_node_child_process3 = require("node:child_process");
-var NONE = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false };
-var PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
-function parseAbilities(text) {
-  const on = (key) => new RegExp(`^${key}=1$`, "m").test(text);
-  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker"), logs: on("logs"), update: on("update") };
-}
-function parseDocker(text) {
-  const list = [];
-  for (const line of text.split("\n")) {
-    const [name, image, state, status = ""] = line.split("	");
-    if (!name || !image || !state) {
-      continue;
-    }
-    const health = /\((healthy|unhealthy)\)/.exec(status)?.[1] ?? (/\(health: starting\)/.test(status) ? "starting" : void 0);
-    const exit = /^Exited \((\d+)\)/.exec(status);
-    list.push({
-      name,
-      image,
-      state,
-      ...health ? { health } : {},
-      ...exit ? { exitCode: Number(exit[1]) } : {}
-    });
-  }
-  return list.sort((a, b) => a.name.localeCompare(b.name));
-}
-function parsePm2(text) {
-  const list = [];
-  for (const line of text.split("\n")) {
-    const [name, status, restarts] = line.split("	");
-    if (name && status) {
-      list.push({ name, status, restarts: Number(restarts) || 0 });
-    }
-  }
-  return list.sort((a, b) => a.name.localeCompare(b.name));
-}
-var Root = class {
-  constructor(helper) {
-    this.helper = helper;
-  }
-  helper;
-  call(args, timeout = 6e4) {
-    return run("sudo", ["-n", this.helper, ...args], { timeout });
-  }
-  /** A reading action of the helper for a tool of the AI (docker-logs, pm2-logs, nginx-test, certbot) */
-  read(args) {
-    return run("sudo", ["-n", this.helper, ...args], { timeout: 9e4, maxBuffer: 32 * 1024 * 1024 });
-  }
-  async abilities() {
-    const r = await this.call(["can"], 15e3);
-    return r.code === 0 ? parseAbilities(r.stdout) : NONE;
-  }
-  /** Loads the lists of packages again; the error text if it failed */
-  async aptUpdate() {
-    const r = await this.call(["apt-update"], 15 * 6e4);
-    return r.code === 0 ? null : (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500);
-  }
-  /** null: no pm2 or not allowed */
-  async pm2() {
-    const r = await this.call(["pm2"], 3e4);
-    return r.code === 0 ? parsePm2(r.stdout) : null;
-  }
-  /** null: no Docker or not allowed */
-  async docker() {
-    const r = await this.call(["docker"], 3e4);
-    return r.code === 0 ? parseDocker(r.stdout) : null;
-  }
-  /**
-   * Upgrades the packages, with the output of apt-get as it comes. Resolves with the exit code (null: not started).
-   *
-   * @param packages names, checked before (PACKAGE_NAME); the helper checks them again
-   * @param onOutput the output, piece by piece
-   */
-  aptUpgrade(packages, onOutput) {
-    return new Promise((resolve) => {
-      const child = (0, import_node_child_process3.spawn)("sudo", ["-n", this.helper, "apt-upgrade", ...packages], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" }
-      });
-      child.stdout.on("data", (b) => onOutput(b.toString("utf8")));
-      child.stderr.on("data", (b) => onOutput(b.toString("utf8")));
-      child.on("error", (err) => {
-        onOutput(`${err.message}
-`);
-        resolve(null);
-      });
-      child.on("close", (code) => resolve(code));
-    });
-  }
-  /**
-   * Downloads the newest bee-linux and starts install.sh in a unit of its own, which restarts this agent shortly
-   * after. The version that is being installed, or the error.
-   */
-  async selfUpdate() {
-    const r = await this.call(["self-update"], 5 * 6e4);
-    const version = r.stdout.trim().split("\n").pop() ?? "";
-    return r.code === 0 && /^\d+\.\d+\.\d+/.test(version) ? { version } : { error: (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500) };
-  }
-  /** Restarts the server; the agent gets SIGTERM from systemd shortly after */
-  async reboot() {
-    const r = await this.call(["reboot"], 3e4);
-    return r.code === 0 ? null : (r.stderr || r.error || `Ende mit ${r.code}`).trim().slice(-300);
-  }
-};
+// src/tools.ts
+var import_node_fs3 = require("node:fs");
+var import_promises4 = require("node:fs/promises");
+var import_node_os2 = __toESM(require("node:os"), 1);
+var import_node_path2 = require("node:path");
+var import_node_zlib = require("node:zlib");
 
 // src/system.ts
 var import_promises3 = require("node:fs/promises");
@@ -25104,11 +25005,6 @@ async function ntpSynced() {
 }
 
 // src/tools.ts
-var import_node_fs3 = require("node:fs");
-var import_promises4 = require("node:fs/promises");
-var import_node_os2 = __toESM(require("node:os"), 1);
-var import_node_path2 = require("node:path");
-var import_node_zlib = require("node:zlib");
 var MAX_TOOL_TEXT = 200 * 1024;
 var MAX_LINES2 = 2e3;
 var MAX_FILE = 64 * 1024 * 1024;
@@ -25684,6 +25580,242 @@ ${text.slice(-MAX_TOOL_TEXT)}`, isError: false, truncated: true } : { text, isEr
   }
 }
 
+// src/diagnose.ts
+var DIAGNOSE_MAX = 64 * 1024;
+var SUBJECT = /^[A-Za-z0-9@:._/\\-]{1,200}$/;
+async function section(tools, title, name, args) {
+  const r = await callTool(tools, name, args);
+  return `== ${title} ==
+${r.text.trim() || "(leer)"}`;
+}
+async function program2(title, file2, args) {
+  const r = await run(file2, args, { timeout: 2e4 });
+  const out = (r.stdout || r.stderr || r.error || "").trim();
+  return `== ${title} ==
+${out || "(leer)"}`;
+}
+function summarizeSsh(journal2) {
+  const ips = /* @__PURE__ */ new Map();
+  const users = /* @__PURE__ */ new Map();
+  let total = 0;
+  for (const line of journal2.split("\n")) {
+    const ip = /\bfrom ((?:\d{1,3}\.){3}\d{1,3}|[0-9a-f]*:[0-9a-f:]+)\b/i.exec(line)?.[1];
+    if (!ip) {
+      continue;
+    }
+    total++;
+    ips.set(ip, (ips.get(ip) ?? 0) + 1);
+    const user = /(?:Invalid user|invalid user|Failed \S+ for(?: invalid user)?) (\S+) from/.exec(line)?.[1];
+    if (user) {
+      users.set(user, (users.get(user) ?? 0) + 1);
+    }
+  }
+  const top = (m) => [...m].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => `  ${String(n).padStart(6)}  ${k}`).join("\n") || "  \u2013";
+  return `${total} fehlgeschlagene Anmeldungen von ${ips.size} Adressen
+
+H\xE4ufigste Adressen:
+${top(ips)}
+
+H\xE4ufigste Nutzernamen:
+${top(users)}`;
+}
+async function diagnose(tools, code, subject, checks) {
+  const parts = [];
+  switch (code) {
+    case "unit-failed":
+      parts.push(await section(tools, `Dienst ${subject}`, "service_status", { unit: subject, lines: 80 }));
+      break;
+    case "ssh-failed": {
+      const r = await callTool(tools, "read_journal", {
+        since: "-24h",
+        grep: "Failed password|Failed publickey|Invalid user|authentication failure",
+        lines: 2e3
+      });
+      parts.push(`== Fehlgeschlagene Anmeldungen (24 h) ==
+${summarizeSsh(r.text)}`);
+      parts.push(`== Die letzten Zeilen ==
+${r.text.trim().split("\n").slice(-30).join("\n") || "(keine)"}`);
+      parts.push(await program2("Ist fail2ban aktiv?", "systemctl", ["is-active", "fail2ban"]));
+      break;
+    }
+    case "kernel-errors":
+      parts.push(await section(tools, "Kernel, Fehler der letzten 24 h", "read_journal", { kernel: true, priority: "err", since: "-24h", lines: 200 }));
+      break;
+    case "ntp":
+      parts.push(await program2("timedatectl", "timedatectl", ["status"]));
+      parts.push(await program2("Synchronisation", "timedatectl", ["timesync-status"]));
+      break;
+    case "disk-full":
+    case "disk-low":
+    case "disk-trend":
+      parts.push(await program2("Belegung der Dateisysteme", "df", ["-h", "-x", "tmpfs", "-x", "devtmpfs", "-x", "overlay", "-x", "squashfs"]));
+      parts.push(await section(tools, "Gr\xF6\xDFte Log-Ordner", "list_log_files", {}));
+      break;
+    case "inodes-full":
+      parts.push(await program2("Inodes der Dateisysteme", "df", ["-i", "-x", "tmpfs", "-x", "devtmpfs", "-x", "overlay", "-x", "squashfs"]));
+      break;
+    case "pm2":
+      parts.push(await section(tools, "Prozesse von pm2", "pm2_list", {}));
+      parts.push(await section(tools, `Fehler-Log von ${subject}`, "pm2_logs", { name: subject, stream: "error", lines: 80 }));
+      break;
+    case "docker":
+      parts.push(await section(tools, "Container", "docker_containers", {}));
+      parts.push(await section(tools, `Log von ${subject}`, "docker_logs", { name: subject, lines: 100 }));
+      break;
+    case "check":
+    case "check-warn": {
+      const spec = checks.find((c) => c.id === subject);
+      if (!spec) {
+        parts.push("Diese Pr\xFCfung kennt der Agent nicht (mehr).");
+        break;
+      }
+      const r = await runCheck(spec);
+      parts.push(
+        `== Pr\xFCfung \u201E${spec.name}\u201C, jetzt ausgef\xFChrt ==
+Art: ${spec.kind}
+Ziel: ${spec.target || "\u2013"}
+Ergebnis: ${r.state === "ok" ? "in Ordnung" : r.state === "warn" ? "Warnung" : "Fehler"}: ${r.text}`
+      );
+      if (spec.kind === "service") {
+        parts.push(await section(tools, `Dienst ${spec.target}`, "service_status", { unit: spec.target, lines: 40 }));
+      }
+      break;
+    }
+    case "os-security":
+    case "os-updates":
+    case "os-updates-stale":
+    case "reboot-required":
+      parts.push(await section(tools, "Ausstehende Updates", "package_updates", {}));
+      break;
+    case "mem-low":
+      parts.push(await section(tools, "Prozesse nach Speicher", "list_processes", { sort: "mem", limit: 20 }));
+      break;
+    default:
+      parts.push(await section(tools, "\xDCberblick", "overview", {}));
+  }
+  let text = parts.join("\n\n");
+  if (text.length > DIAGNOSE_MAX) {
+    text = `\u2026 (gek\xFCrzt)
+${text.slice(-DIAGNOSE_MAX)}`;
+  }
+  return { text };
+}
+
+// src/root.ts
+var import_node_child_process3 = require("node:child_process");
+var NONE = { apt: false, reboot: false, pm2: false, docker: false, logs: false, update: false, services: false };
+var PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$/;
+function parseAbilities(text) {
+  const on = (key) => new RegExp(`^${key}=1$`, "m").test(text);
+  return { apt: on("apt"), reboot: on("reboot"), pm2: on("pm2"), docker: on("docker"), logs: on("logs"), update: on("update"), services: on("services") };
+}
+function parseDocker(text) {
+  const list = [];
+  for (const line of text.split("\n")) {
+    const [name, image, state, status = ""] = line.split("	");
+    if (!name || !image || !state) {
+      continue;
+    }
+    const health = /\((healthy|unhealthy)\)/.exec(status)?.[1] ?? (/\(health: starting\)/.test(status) ? "starting" : void 0);
+    const exit = /^Exited \((\d+)\)/.exec(status);
+    list.push({
+      name,
+      image,
+      state,
+      ...health ? { health } : {},
+      ...exit ? { exitCode: Number(exit[1]) } : {}
+    });
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name));
+}
+function parsePm2(text) {
+  const list = [];
+  for (const line of text.split("\n")) {
+    const [name, status, restarts] = line.split("	");
+    if (name && status) {
+      list.push({ name, status, restarts: Number(restarts) || 0 });
+    }
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name));
+}
+var Root = class {
+  constructor(helper) {
+    this.helper = helper;
+  }
+  helper;
+  call(args, timeout = 6e4) {
+    return run("sudo", ["-n", this.helper, ...args], { timeout });
+  }
+  /** A reading action of the helper for a tool of the AI (docker-logs, pm2-logs, nginx-test, certbot) */
+  read(args) {
+    return run("sudo", ["-n", this.helper, ...args], { timeout: 9e4, maxBuffer: 32 * 1024 * 1024 });
+  }
+  async abilities() {
+    const r = await this.call(["can"], 15e3);
+    return r.code === 0 ? parseAbilities(r.stdout) : NONE;
+  }
+  /** Loads the lists of packages again; the error text if it failed */
+  async aptUpdate() {
+    const r = await this.call(["apt-update"], 15 * 6e4);
+    return r.code === 0 ? null : (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500);
+  }
+  /** null: no pm2 or not allowed */
+  async pm2() {
+    const r = await this.call(["pm2"], 3e4);
+    return r.code === 0 ? parsePm2(r.stdout) : null;
+  }
+  /** null: no Docker or not allowed */
+  async docker() {
+    const r = await this.call(["docker"], 3e4);
+    return r.code === 0 ? parseDocker(r.stdout) : null;
+  }
+  /**
+   * Upgrades the packages, with the output of apt-get as it comes. Resolves with the exit code (null: not started).
+   *
+   * @param packages names, checked before (PACKAGE_NAME); the helper checks them again
+   * @param onOutput the output, piece by piece
+   */
+  aptUpgrade(packages, onOutput) {
+    return new Promise((resolve) => {
+      const child = (0, import_node_child_process3.spawn)("sudo", ["-n", this.helper, "apt-upgrade", ...packages], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" }
+      });
+      child.stdout.on("data", (b) => onOutput(b.toString("utf8")));
+      child.stderr.on("data", (b) => onOutput(b.toString("utf8")));
+      child.on("error", (err) => {
+        onOutput(`${err.message}
+`);
+        resolve(null);
+      });
+      child.on("close", (code) => resolve(code));
+    });
+  }
+  /**
+   * Downloads the newest bee-linux and starts install.sh in a unit of its own, which restarts this agent shortly
+   * after. The version that is being installed, or the error.
+   */
+  async selfUpdate() {
+    const r = await this.call(["self-update"], 5 * 6e4);
+    const version = r.stdout.trim().split("\n").pop() ?? "";
+    return r.code === 0 && /^\d+\.\d+\.\d+/.test(version) ? { version } : { error: (r.stderr || r.stdout || r.error || `Ende mit ${r.code}`).trim().slice(-500) };
+  }
+  /**
+   * Restarts a failed unit, or clears its failed state (the helper refuses one that is not failed)
+   *
+   * @returns the output, and whether it worked
+   */
+  async unit(action, name) {
+    const r = await this.call(["unit", action, name], 2e5);
+    return { ok: r.code === 0, text: (r.stdout + r.stderr || r.error || `Ende mit ${r.code}`).trim().slice(-4e3) };
+  }
+  /** Restarts the server; the agent gets SIGTERM from systemd shortly after */
+  async reboot() {
+    const r = await this.call(["reboot"], 3e4);
+    return r.code === 0 ? null : (r.stderr || r.error || `Ende mit ${r.code}`).trim().slice(-300);
+  }
+};
+
 // src/transport.ts
 var import_node_events = require("node:events");
 var import_node_tls2 = __toESM(require("node:tls"), 1);
@@ -26018,13 +26150,13 @@ var TunnelClient = class {
 };
 
 // src/agent.ts
-var AGENT_VERSION = "0.3.0";
+var AGENT_VERSION = "0.5.0";
 var MIN = 6e4;
 var JOURNAL_EVERY = 10 * MIN;
 var APT_LIST_EVERY = 30 * MIN;
 var EXTRAS_EVERY = 5 * MIN;
 var MAX_REPLY_TEXT = 8e3;
-var LATEST_URL = "https://raw.githubusercontent.com/ioSofting/bee-linux/main/package.json";
+var LATEST_URL = "https://registry.npmjs.org/bee-linux/latest";
 var LATEST_EVERY = 6 * 60 * MIN;
 function parseLatest(text) {
   try {
@@ -26068,7 +26200,7 @@ async function enroll(url, req) {
 function buildInventory(input) {
   const { c } = input;
   const comment = normalizeComment(input.config.comment);
-  const commands = ["checks", "mcp"];
+  const commands = ["checks", "mcp", "diagnose"];
   if (c.abilities.apt && c.osUpdates) {
     commands.push("osUpgrade");
   }
@@ -26077,6 +26209,9 @@ function buildInventory(input) {
   }
   if (c.abilities.update) {
     commands.push("agentUpdate");
+  }
+  if (c.abilities.services) {
+    commands.push("unit");
   }
   const root = c.linux.mounts.find((m) => m.path === "/");
   return {
@@ -26151,7 +26286,7 @@ var Agent = class {
   collecting = null;
   /** An upgrade of packages is running */
   upgrading = false;
-  /** The newest version on GitHub, when the agent may update itself */
+  /** The newest version on npm, when the agent may update itself */
   latest = null;
   /** An update of the agent itself was started */
   updating = false;
@@ -26422,6 +26557,16 @@ var Agent = class {
           await this.agentUpdate(job);
         }
         return;
+      case "diagnose":
+        if (job.ref) {
+          await this.diagnose(job);
+        }
+        return;
+      case "unit":
+        if (job.ref) {
+          await this.unit(job);
+        }
+        return;
       case "mcp":
         if (job.ref && job.mcp) {
           await this.mcp(job.ref, job.mcp);
@@ -26535,6 +26680,38 @@ ${tail2}`);
       return;
     }
     await this.reply(ref, "done", tail2);
+  }
+  /** Details for a deviation a person clicked on in the portal: only reading, fixed per code (diagnose.ts) */
+  async diagnose(job) {
+    const ref = job.ref;
+    const code = job.diagnose?.code;
+    const subject = job.diagnose?.subject;
+    if (typeof code !== "string" || !/^[a-z0-9-]{1,40}$/.test(code) || subject !== void 0 && (typeof subject !== "string" || !SUBJECT.test(subject))) {
+      await this.reply(ref, "error", "Ung\xFCltige Anfrage");
+      return;
+    }
+    this.log.info(`Details for ${code}${subject ? ` ${subject}` : ""} for ${job.by ?? "?"}`);
+    const d = await diagnose(this.tools, code, subject, this.checks?.list ?? []);
+    await this.transport?.publish("reply", { v: PROTOCOL_VERSION, ts: Date.now(), ref, state: "done", text: d.text });
+  }
+  /** Restarts a failed unit, or clears its failed state (the helper allows only failed units) */
+  async unit(job) {
+    const ref = job.ref;
+    const name = job.unit?.name;
+    const action = job.unit?.action;
+    if (typeof name !== "string" || !UNIT_NAME.test(name) || action !== "restart" && action !== "reset-failed") {
+      await this.reply(ref, "error", "Ung\xFCltige Anfrage");
+      return;
+    }
+    if (!this.extras?.abilities.services) {
+      await this.reply(ref, "error", "bee-linux darf keine Dienste neu starten (SERVICES=1 in /etc/bee-linux/root.conf)");
+      return;
+    }
+    this.log.info(`${action} of ${name} for ${job.by ?? "?"}`);
+    await this.reply(ref, "running", action === "restart" ? `${name} wird neu gestartet` : `Fehlerstatus von ${name} wird zur\xFCckgesetzt`);
+    const r = await this.root.unit(action, name);
+    await this.collect(false);
+    await this.reply(ref, r.ok ? "done" : "error", r.text || (r.ok ? "erledigt" : "fehlgeschlagen"));
   }
   /** Installs the newest bee-linux through the helper; install.sh restarts this agent a moment later */
   async agentUpdate(job) {

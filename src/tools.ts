@@ -134,7 +134,7 @@ export async function logPath(path: string): Promise<string> {
     return real;
 }
 
-interface Tool {
+export interface Tool {
     def: McpTool;
     run: (args: Args) => Promise<string>;
 }

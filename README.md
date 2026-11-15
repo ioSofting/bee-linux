@@ -13,22 +13,24 @@ certificate, plus a WebSocket for the console).
 Requirements: systemd, Node.js 18 or newer (`node` in the `PATH` of root, not in a home folder), `sudo`. The console
 also needs `script` (util-linux).
 
-1. In the portal, create the asset and an enrollment token (asset, "Enrollment-Token …").
-2. On the server, as root:
+1. In the portal, create the asset and an enrollment token (asset, "Enrollment-Token …"). The dialog shows the
+   command for the server.
+2. On the server:
 
 ```sh
-git clone https://github.com/ioSofting/bee-linux.git
-cd bee-linux
-sudo ./install.sh --token <enrollment token> --comment "Webserver Kunde Müller"
+sudo npx bee-linux@latest install
 ```
 
-The server then appears in the portal. Check the log with `journalctl -u bee-linux -f`.
+It asks for the server (default `https://beekeeper.one`), the enrollment token (hidden input), a comment and what the
+portal may do there (console, AI access, updates of packages, restart, Docker, pm2, updates of bee-linux), then runs
+`install.sh` of the package. The server then appears in the portal. Check the log with `journalctl -u bee-linux -f`.
 
-Options of `install.sh` (also later, to change a setting; without options it updates and keeps everything):
+Without questions (scripts, images): `sudo BEE_TOKEN=<token> npx bee-linux@latest install --yes [options]`. The token
+goes to `install.sh` by the environment, not on its command line.
 
 | Option | Meaning |
 | --- | --- |
-| `--token T` | one-time enrollment token from the portal |
+| `--token T` | one-time enrollment token from the portal (better: `BEE_TOKEN` in the environment) |
 | `--url URL` | the beekeeper server (default `https://beekeeper.one`) |
 | `--comment TEXT` | shown in the portal |
 | `--console` / `--no-console` | allow the console in the portal (default off) |
@@ -37,18 +39,34 @@ Options of `install.sh` (also later, to change a setting; without options it upd
 | `--update` / `--no-update` | allow updates of bee-linux itself from the portal (default on) |
 | `--apt` / `--no-apt` | allow updates of packages from the portal (default on) |
 | `--reboot` / `--no-reboot` | allow a restart from the portal (default on) |
+| `--services` / `--no-services` | restart a failed service from the portal, or clear its failed state (default on; only failed ones) |
 | `--docker` / `--no-docker` | report the containers of Docker (default on if Docker is installed) |
 | `--pm2-user USER` | report the processes of pm2 of this user |
-| `--uninstall [--purge]` | remove; `--purge` also removes the settings, the enrollment and the user |
+| `--yes` | no questions |
 
-Update: in the portal (asset, "Agent", button "Aktualisieren" when GitHub has a newer version), or by hand with
-`git pull && sudo ./install.sh`.
+Later: `sudo npx bee-linux@latest update` (keeps the settings; an option changes one),
+`sudo npx bee-linux@latest uninstall [--purge]` (`--purge` also removes the settings, the enrollment and the user).
+`install.sh` takes the same options and works from a clone of this repository as well.
 
-From the portal, the helper downloads `install.sh`, `bee-root` and the agent, always from
-`https://raw.githubusercontent.com/ioSofting/bee-linux/main` (the portal can start an update, but never say where
-the code comes from), and runs `install.sh` in a unit of its own; it keeps the settings and restarts the service. The
-output is in `/var/log/bee-linux/update.log`. The agent looks up the newest version every 6 hours (`package.json` on
-GitHub). `UPDATE=0` in `root.conf` (`--no-update`) switches both off.
+### Updates from the portal
+
+The agent looks up the newest version on npm every 6 hours (`https://registry.npmjs.org/bee-linux/latest`); the portal
+shows it in the row "Agent" with the button "Aktualisieren". The helper then downloads the package of that version,
+always from `registry.npmjs.org` (the portal can start an update, but never say where the code comes from), checks it
+against the checksum (sha512) the registry gives, and runs its `install.sh` in a unit of its own; that keeps the
+settings and restarts the service. The output is in `/var/log/bee-linux/update.log`. `UPDATE=0` in `root.conf`
+(`--no-update`) switches both off.
+
+## Publishing (maintainers)
+
+GitHub Actions publishes (`.github/workflows/test-and-release.yml`, trusted publishing on npm, no token):
+
+1. Set the new version in `package.json` and `AGENT_VERSION` in `src/agent.ts` (a test checks they are the same, and
+   the helper refuses a package whose agent has another version), `npm run build`, commit.
+2. `git tag v0.4.1 && git push && git push --tags`.
+
+The workflow tests on Node.js 20, 22 and 24, checks that the tag is that version, publishes on npm and creates the
+GitHub release. A pre-release tag (`v0.5.0-beta.1`) goes to the dist-tag `next`, so the agents do not offer it.
 
 ## What it sets up
 
@@ -57,7 +75,7 @@ GitHub). `UPDATE=0` in `root.conf` (`--no-update`) switches both off.
 | user `bee` | system user without login; groups `systemd-journal` and `adm` to read the journal and the logs |
 | `/opt/bee-linux` | `bee-linux.cjs` (the agent, one file) and `bee-root` (the helper for root), owned by root |
 | `/etc/bee-linux/bee-linux.env` | settings of the agent (`BEE_URL`, `BEE_TOKEN`, `BEE_COMMENT`, `BEE_CONSOLE`, `BEE_AI`, `BEE_CHECK`, `BEE_HEARTBEAT`, `BEE_APT_UPDATE`) |
-| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`, `LOGS`, `UPDATE`) |
+| `/etc/bee-linux/root.conf` | what the helper may do as root (`APT`, `REBOOT`, `DOCKER`, `PM2_USER`, `LOGS`, `UPDATE`, `SERVICES`) |
 | `/var/lib/bee-linux` | device certificate, UUID and the checks from the portal; keep it, or the server enrolls anew |
 | `/etc/sudoers.d/bee-linux` | `bee` may run `/opt/bee-linux/bee-root` without a password, nothing else |
 | `bee-linux.service` | the service (systemd), as user `bee` |
@@ -76,6 +94,14 @@ GitHub). `UPDATE=0` in `root.conf` (`--no-update`) switches both off.
 - The server decides nothing about targets on the device: the checks are validated on both sides (unit names,
   host:port, http(s) addresses, absolute paths), and the console address must belong to the own server.
 - The AI access has no shell and nothing that writes: only the fixed tools below, each with checked arguments.
+
+## Deviations in the portal
+
+A click on a deviation of the server opens it with the details read live from the server (only reading, the same
+fixed reads as the tools of the AI access): the state and journal of a failed service, the sources and user names of
+failed SSH logins, the errors of the kernel, the filesystems, the result of a check run again, the log of a container or
+of a pm2 process (with `LOGS=1`), the pending updates. Buttons there restart a failed service or clear its failed
+state (`SERVICES=1`), install updates, restart the server, open the console or an AI session.
 
 ## Checks
 

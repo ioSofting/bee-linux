@@ -213,7 +213,7 @@ export interface LinuxInfo {
     /** What sudo allows the agent: apt (update and upgrade of packages), reboot */
     sudo: { apt: boolean; reboot: boolean };
     /**
-     * The newest version of bee-linux on GitHub, looked up by the agent every few hours when it may update itself
+     * The newest version of bee-linux on npm, looked up by the agent every few hours when it may update itself
      * (command agentUpdate; since 0.3.0). null: not known.
      */
     agentLatest?: string | null;
@@ -549,7 +549,9 @@ export type AgentCommand =
     | 'visProjects'
     | 'checks'
     | 'reboot'
-    | 'agentUpdate';
+    | 'agentUpdate'
+    | 'diagnose'
+    | 'unit';
 
 /**
  * Command 'software' (since agent 0.2.7): removeAdapter removes an adapter with all its instances (not the agent,
@@ -655,8 +657,11 @@ export interface JobMessage {
      * checks: the checks of the portal for a Linux server (bee-linux), replacing the ones before; no answer, the agent
      * reports LinuxInfo.checksHash
      * reboot: restart the operating system (bee-linux)
-     * agentUpdate: install the newest version of the agent itself (bee-linux from 0.3.0: from GitHub, never from the
+     * agentUpdate: install the newest version of the agent itself (bee-linux from 0.4.0: from npm, never from the
      * server); the agent answers when the installation started, then it restarts
+     * diagnose: details for a deviation, for a person who clicks on it (bee-linux from 0.5.0; answer: ReplyMessage.text);
+     * only reads, with fixed arguments per code
+     * unit: restart a failed unit of systemd, or clear its failed state (bee-linux from 0.5.0, SERVICES=1)
      */
     cmd:
         | 'resync'
@@ -674,7 +679,13 @@ export interface JobMessage {
         | 'visProjects'
         | 'checks'
         | 'reboot'
-        | 'agentUpdate';
+        | 'agentUpdate'
+        | 'diagnose'
+        | 'unit';
+    /** For cmd 'diagnose': the code of the deviation and what it is about */
+    diagnose?: { code: string; subject?: string };
+    /** For cmd 'unit' */
+    unit?: { name: string; action: 'restart' | 'reset-failed' };
     /** For cmd 'tunnel' */
     tunnel?: TunnelRequest;
     /** Commands: the agent answers on topic reply with this reference */
@@ -727,6 +738,8 @@ export interface ReplyMessage {
     files?: LogFile[];
     /** For cmd 'visProjects': the projects of vis-2, sorted */
     projects?: string[];
+    /** For cmd 'diagnose': the details, plain text */
+    text?: string;
     /** For cmd 'mcp' */
     mcp?: McpReply;
 }
