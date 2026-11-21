@@ -273,6 +273,18 @@ export interface Inventory {
      */
     knx?: KnxInfo;
     /**
+     * Devices in the network (remote access of kind lan, and KNX gateways named by the server): the boundary the
+     * owner sets in the instance of bee (since agent 0.5.0). Only while the owner allows devices in the network or
+     * KNX; missing: neither, or an older agent.
+     */
+    lan?: LanInfo;
+    /**
+     * Monitoring: rules on states set in the instance of bee, e.g. "victron.0.voltage < 11.5, warning", and how they
+     * stand (since agent 0.5.0). A rule that alerts is a deviation of the asset. Missing: no rules or older agent.
+     * Not part of the history.
+     */
+    monitors?: MonitorStatus[];
+    /**
      * Updates of operating system packages as js-controller (6 and newer) lists them, see OsUpdates.
      * Missing: unknown (older agent, older js-controller, no Linux). Not part of the history.
      */
@@ -326,6 +338,11 @@ export interface Inventory {
          * older agent (before 0.2.11). Only the settings are part of the history, not the runs.
          */
         backitup?: BackitupInfo | null;
+        /**
+         * The automatic backup of Home Assistant (bee-ha), see HaBackupInfo. null: never set up. Missing: not a Home
+         * Assistant, or the configuration folder is not mounted for the agent.
+         */
+        homeassistant?: HaBackupInfo | null;
     };
 }
 
@@ -364,6 +381,25 @@ export interface HostInventory {
     osUpdates?: OsUpdates;
     /** Commands of the agent that work on this host (JobMessage.host) */
     commands: AgentCommand[];
+}
+
+/**
+ * The automatic backup of Home Assistant, as set in Settings, System, Backups: bee-ha reads it from the storage file
+ * .storage/backup in the configuration folder (Home Assistant 2025.1 and newer), without a token.
+ */
+export interface HaBackupInfo {
+    /** Automatic backups are set up and not on "never" */
+    scheduled: boolean;
+    /** Longest gap between two automatic backups in days (daily: 1; custom days, e.g. Monday and Thursday: 4) */
+    everyDays: number;
+    /** Locations outside the device (backup agents other than backup.local and hassio.local), e.g. "cloud.cloud" */
+    targets: string[];
+    /** The last automatic backup started (ms) */
+    lastAttempt: number | null;
+    /** The last automatic backup finished (ms); with a target outside the device, it went there too */
+    lastOk: number | null;
+    /** Size of the last finished one (bytes) */
+    lastSize: number | null;
 }
 
 /**
@@ -534,7 +570,8 @@ export type InstanceAction = 'start' | 'stop' | 'restart';
 
 /**
  * Commands from the asset detail an agent may understand (Inventory.commands). hosts: the agent reports the other
- * hosts of the system (Inventory.hosts) and carries out commands there (JobMessage.host).
+ * hosts of the system (Inventory.hosts) and carries out commands there (JobMessage.host). controller: js-controller
+ * can upgrade itself (ioBroker.bee from 0.5.0, Linux, js-controller 5 or newer).
  */
 export type AgentCommand =
     | 'instance'
@@ -551,7 +588,8 @@ export type AgentCommand =
     | 'reboot'
     | 'agentUpdate'
     | 'diagnose'
-    | 'unit';
+    | 'unit'
+    | 'controller';
 
 /**
  * Command 'software' (since agent 0.2.7): removeAdapter removes an adapter with all its instances (not the agent,
@@ -662,6 +700,9 @@ export interface JobMessage {
      * diagnose: details for a deviation, for a person who clicks on it (bee-linux from 0.5.0; answer: ReplyMessage.text);
      * only reads, with fixed arguments per code
      * unit: restart a failed unit of systemd, or clear its failed state (bee-linux from 0.5.0, SERVICES=1)
+     * controller: upgrade js-controller, as admin does it: js-controller starts its upgrade manager, which stops
+     * ioBroker, installs the version with npm and starts ioBroker again (ioBroker.bee from 0.5.0). The agent answers
+     * "running" once js-controller took the order; the outcome is the version in the next inventory of that host.
      */
     cmd:
         | 'resync'
@@ -681,11 +722,14 @@ export interface JobMessage {
         | 'reboot'
         | 'agentUpdate'
         | 'diagnose'
-        | 'unit';
+        | 'unit'
+        | 'controller';
     /** For cmd 'diagnose': the code of the deviation and what it is about */
     diagnose?: { code: string; subject?: string };
     /** For cmd 'unit' */
     unit?: { name: string; action: 'restart' | 'reset-failed' };
+    /** For cmd 'controller': the version of js-controller to install, newer than the installed one */
+    controller?: { version: string };
     /** For cmd 'tunnel' */
     tunnel?: TunnelRequest;
     /** Commands: the agent answers on topic reply with this reference */
@@ -693,7 +737,7 @@ export interface JobMessage {
     /** Who asked, for the log on the device */
     by?: string;
     /**
-     * For instance, restart, osUpgrade, logList, logFetch, adapter and software: on this other host of the system
+     * For instance, restart, osUpgrade, logList, logFetch, adapter, software and controller: on this other host of the system
      * (HostInventory.name, one of its HostInventory.commands); missing: on the host of the agent. Only to an agent
      * with the command 'hosts': an older one would do it on its own host.
      */
@@ -749,10 +793,69 @@ export interface ReplyMessage {
  * device (console; off unless the owner switches it on, see tunnel.ts for its messages), and KNX for ETS
  * (knx; off unless the owner switches it on). A stream of knx carries KNXnet/IP frames back to back as over
  * TCP (HPAIs "TCP, 0.0.0.0:0"); the agent passes them to its gateway, over UDP if the gateway has no TCP.
- * ha: the web interface of Home Assistant (agent bee-ha only).
+ * ha: the web interface of Home Assistant (agent bee-ha only). lan: a device in the network of the asset, e.g. a
+ * LOGO! or an S7 (off unless the owner switches it on): every stream is one TCP connection to TunnelRequest.lan,
+ * its OPEN frame names the port (portMeta in tunnel.ts).
  */
-export type AccessKind = 'admin' | 'vis' | 'console' | 'knx' | 'ha';
-export const ACCESS_KINDS: AccessKind[] = ['admin', 'vis', 'console', 'knx', 'ha'];
+export type AccessKind = 'admin' | 'vis' | 'console' | 'knx' | 'ha' | 'lan';
+export const ACCESS_KINDS: AccessKind[] = ['admin', 'vis', 'console', 'knx', 'ha', 'lan'];
+
+/**
+ * What the owner lets the fleet reach in the network of the device (Inventory.lan). The agent checks every request
+ * against it; the portal only shows it.
+ */
+export interface LanInfo {
+    /** Devices in the network may be reached (switch in the instance) */
+    devices: boolean;
+    /** Networks the devices and KNX gateways named by the server must be in, e.g. "192.168.0.0/24"; only private ones */
+    networks: string[];
+    /** Ports the devices may be reached on; null: any */
+    ports: number[] | null;
+}
+
+/** A device in the network for a remote access of kind lan, from the list of the asset in the portal */
+export interface LanTarget {
+    name: string;
+    /** IPv4 address */
+    host: string;
+    /** TCP ports, at most MAX_LAN_PORTS */
+    ports: number[];
+}
+
+/** Ports of one device in the network: LOGO! 8 needs two (102, 10005), an S7 one */
+export const MAX_LAN_PORTS = 8;
+
+/** What a rule of the monitoring raises: info = Hinweis, warning = Mittel, error = Hoch, critical = Kritisch */
+export type MonitorSeverity = 'info' | 'warning' | 'error' | 'critical';
+export const MONITOR_SEVERITIES: MonitorSeverity[] = ['info', 'warning', 'error', 'critical'];
+
+/** When a rule alerts: the value compared with its limit, or stale: no update of the state for `value` minutes */
+export type MonitorOp = '<' | '<=' | '>' | '>=' | '==' | '!=' | 'stale';
+export const MONITOR_OPS: MonitorOp[] = ['<', '<=', '>', '>=', '==', '!=', 'stale'];
+
+/** A rule of the monitoring and how it stands right now (Inventory.monitors) */
+export interface MonitorStatus {
+    /** The same as long as state, condition and limit stay: "victron.0.voltage < 11.5" */
+    id: string;
+    label?: string;
+    stateId: string;
+    op: MonitorOp;
+    /** The limit as set ("11.5"); with stale the minutes */
+    value: string;
+    severity: MonitorSeverity;
+    /** common.unit of the state, e.g. "V" */
+    unit?: string;
+    /** The condition holds, longer than the delay of the rule: a deviation of the asset */
+    alert: boolean;
+    /** Since when the condition holds (ms), with alert */
+    since?: number;
+    /** The value: when the alert began, otherwise the last one seen */
+    val?: string | number | boolean | null;
+    /** Last update of the state (ms) */
+    ts?: number;
+    /** The state does not exist or has no value */
+    missing?: boolean;
+}
 
 export interface KnxInfo {
     /** "192.168.1.20" or "host:port" */
@@ -795,6 +898,13 @@ export interface TunnelRequest {
     purpose: string;
     /** Instance to connect to, one of Inventory.accessTargets of this kind; missing: the first one */
     instance?: string;
+    /** Kind lan: the device in the network (the agent checks it against Inventory.lan) */
+    lan?: LanTarget;
+    /**
+     * Kind knx: a gateway from the list of the asset instead of the one set in the instance, "192.168.0.10" or
+     * "host:port" (since agent 0.5.0; the agent checks it against Inventory.lan). Missing: the one of the instance.
+     */
+    knxGateway?: string;
 }
 
 export type JobState =
