@@ -24234,13 +24234,15 @@ function frame(type, id, payload) {
   return buf;
 }
 var TunnelStream = class extends import_node_stream.Duplex {
-  constructor(mux, id) {
+  constructor(mux, id, meta = Buffer.alloc(0)) {
     super({ allowHalfOpen: true });
     this.mux = mux;
     this.id = id;
+    this.meta = meta;
   }
   mux;
   id;
+  meta;
   /** Bytes this side may still send */
   credit = WINDOW;
   /** Write waiting for credit */
@@ -24347,15 +24349,15 @@ var Mux = class {
   get isClosed() {
     return this.closed;
   }
-  open() {
+  open(meta) {
     if (this.closed) {
       throw new Error("tunnel closed");
     }
     const id = this.nextId;
     this.nextId = this.nextId >= 4294967295 ? 1 : this.nextId + 1;
-    const stream = new TunnelStream(this, id);
+    const stream = new TunnelStream(this, id, meta);
     this.streams.set(id, stream);
-    this.sendFrame(FRAME.OPEN, id);
+    this.sendFrame(FRAME.OPEN, id, meta);
     return stream;
   }
   receive(buf) {
@@ -24370,7 +24372,7 @@ var Mux = class {
         this.sendFrame(FRAME.RESET, id, Buffer.from("refused"));
         return;
       }
-      const stream2 = new TunnelStream(this, id);
+      const stream2 = new TunnelStream(this, id, Buffer.from(payload));
       this.streams.set(id, stream2);
       this.onStream(stream2);
       return;
@@ -26150,7 +26152,7 @@ var TunnelClient = class {
 };
 
 // src/agent.ts
-var AGENT_VERSION = "0.5.1";
+var AGENT_VERSION = "0.5.2";
 var MIN = 6e4;
 var JOURNAL_EVERY = 10 * MIN;
 var APT_LIST_EVERY = 30 * MIN;
